@@ -1,19 +1,26 @@
 #!/bin/bash
 
 # Define variables
-DOWNLOAD_URL="https://downloads.pro-service.link/l2tp-manager.zip"
+REPO_URL="https://github.com/h4775346/l2tp-manager.git"
 TARGET_DIR="/opt/sas4/site/l2tp-manager/"
 APACHE_CONF="/etc/apache2/sites-enabled/sas4.conf"
 CHAP_SECRETS="/etc/ppp/chap-secrets"
 
-# Create the target directory if it does not exist
-mkdir -p $TARGET_DIR
+# Update package list and install necessary packages
+apt-get update
+apt-get install -y git unzip curl apache2
 
-# Download the ZIP file using curl
-curl -o /tmp/l2tp-manager.zip $DOWNLOAD_URL
+# Clone the GitHub repository
+if [ ! -d "$TARGET_DIR" ]; then
+    git clone $REPO_URL $TARGET_DIR
+else
+    echo "Directory $TARGET_DIR already exists. Pulling the latest changes."
+    cd $TARGET_DIR
+    git pull
+fi
 
-# Unzip the downloaded file into the target directory
-unzip -o /tmp/l2tp-manager.zip -d $TARGET_DIR
+# Ensure /etc/ppp/chap-secrets is writable
+chmod 666 $CHAP_SECRETS
 
 # Define the Alias and Directory block
 ALIAS_BLOCK=$(cat <<EOT
@@ -32,13 +39,7 @@ if ! grep -q "/l2tp-manager/" $APACHE_CONF; then
     awk -v insert="$ALIAS_BLOCK" '/ProxyRequests off/ {print; print insert; next}1' $APACHE_CONF > /tmp/sas4.conf && mv /tmp/sas4.conf $APACHE_CONF
 fi
 
-# Allow writing to the chap-secrets file
-chmod 666 $CHAP_SECRETS
-
 # Restart Apache to apply the changes
 systemctl restart apache2
-
-# Cleanup
-rm /tmp/l2tp-manager.zip
 
 echo "l2tp-manager installed and Apache configuration updated."
