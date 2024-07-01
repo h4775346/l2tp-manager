@@ -1,6 +1,7 @@
 <?php
 
-$file = "/etc/ppp/chap-secrets";
+//$file = "/etc/ppp/chap-secrets";
+$file = "./chap-secrets";
 
 // Read the file into an array
 function readUsers($file) {
@@ -35,6 +36,21 @@ function writeUsers($file, $users) {
 // Generate random password
 function generateRandomPassword($length = 12) {
     return bin2hex(random_bytes($length / 2));
+}
+
+// Generate unique username
+function generateUniqueUsername($users) {
+    do {
+        $username = 'user' . bin2hex(random_bytes(4));
+        $unique = true;
+        foreach ($users as $user) {
+            if ($user['client'] === $username) {
+                $unique = false;
+                break;
+            }
+        }
+    } while (!$unique);
+    return $username;
 }
 
 // Get the next available IP address
@@ -109,21 +125,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ipRangeTo = !empty($_POST['ipRangeTo']) ? ip2long($_POST['ipRangeTo']) : $ipRangeFrom + $numUsers - 1;
 
         $newUsers = [];
+        $addedUsers = 0;
 
-        for ($i = 0; $i < $numUsers; $i++) {
-            $username = 'user' . (count($users) + $i + 1);
+        for ($i = 0; $addedUsers < $numUsers; $i++) {
+            $username = generateUniqueUsername(array_merge($users, $newUsers));
             $userIp = long2ip($ipRangeFrom + $i);
 
-            // Check for duplicate username and IP within existing and new users
+            // Check for duplicate IP within existing and new users
+            $isDuplicateIp = false;
             foreach (array_merge($users, $newUsers) as $user) {
-                if ($user['client'] === $username) {
-                    echo json_encode(['error' => 'Username ' . $username . ' already exists']);
-                    exit();
-                }
                 if ($user['ip'] === $userIp) {
-                    echo json_encode(['error' => 'IP address ' . $userIp . ' already exists']);
-                    exit();
+                    $isDuplicateIp = true;
+                    break;
                 }
+            }
+
+            if ($isDuplicateIp) {
+                continue;
             }
 
             // Ensure the IP range does not exceed the defined ranges
@@ -138,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'secret' => generateRandomPassword(),
                 'ip' => $userIp
             ];
+            $addedUsers++;
         }
 
         $users = array_merge($users, $newUsers);
@@ -147,6 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?>
+
 
 <!DOCTYPE html>
 <html>
