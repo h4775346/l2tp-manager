@@ -23,6 +23,10 @@ fi
 # Ensure /etc/ppp/chap-secrets is writable
 chmod 666 $CHAP_SECRETS
 
+# Ensure the target directory is writable by the web server
+chown -R www-data:www-data $TARGET_DIR
+chmod -R 755 $TARGET_DIR
+
 # Define the Alias and Directory block
 ALIAS_BLOCK=$(cat <<EOT
 Alias /l2tp-manager $TARGET_DIR
