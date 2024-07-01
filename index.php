@@ -1,7 +1,7 @@
 <?php
 
-//$file = "/etc/ppp/chap-secrets";
-$file = "./chap-secrets";
+$file = "/etc/ppp/chap-secrets";
+//$file = "./chap-secrets";
 
 // Read the file into an array
 function readUsers($file) {
