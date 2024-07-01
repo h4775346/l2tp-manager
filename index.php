@@ -39,6 +39,10 @@ function generateRandomPassword($length = 12) {
 
 // Get the next available IP address
 function getNextIp($users) {
+    if (empty($users)) {
+        return '10.255.10.11';
+    }
+
     $lastIp = end($users)['ip'];
     $lastIpLong = ip2long($lastIp);
     $nextIpLong = $lastIpLong + 1;
