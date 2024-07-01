@@ -14,8 +14,9 @@ apt-get install -y git unzip curl apache2
 if [ ! -d "$TARGET_DIR" ]; then
     git clone $REPO_URL $TARGET_DIR
 else
-    echo "Directory $TARGET_DIR already exists. Pulling the latest changes."
+    echo "Directory $TARGET_DIR already exists. Stashing local changes and pulling the latest changes."
     cd $TARGET_DIR
+    git stash
     git pull
 fi
 
