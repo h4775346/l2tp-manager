@@ -1,7 +1,24 @@
 <?php
+session_start();
+// Define default config values
+$defaultConfig = [
+    'chap_secrets_path' => '/etc/ppp/chap-secrets',
+    'admin_username' => 'admin',
+    'admin_password' => password_hash('change@me', PASSWORD_DEFAULT),
+];
 
-$file = "/etc/ppp/chap-secrets";
-//$file = "./chap-secrets";
+// Create config.php if it doesn't exist
+if (!file_exists('config.php')) {
+    file_put_contents('config.php', '<?php return ' . var_export($defaultConfig, true) . ';');
+}
+
+if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+    header('Location: login.php');
+    exit();
+}
+
+$config = include 'config.php';
+$file = $config['chap_secrets_path'];
 
 // Read the file into an array
 function readUsers($file) {
@@ -88,6 +105,14 @@ function getNextIp($users) {
 $users = readUsers($file);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Handle logout
+    if (isset($_POST['logout'])) {
+        session_destroy();
+        header('Location: login.php');
+        exit();
+    }
+
+    // Handle add user
     if (isset($_POST['add'])) {
         $client = $_POST['client'];
         $ip = $_POST['ip'] ?? getNextIp($users);
@@ -163,10 +188,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         writeUsers($file, $users);
         echo json_encode(['success' => true]);
         exit();
+    } elseif (isset($_POST['changePassword'])) {
+        $newPassword = password_hash($_POST['newPassword'], PASSWORD_DEFAULT);
+
+        // Read the config file
+        $config = include 'config.php';
+
+        // Update the password in the config file
+        $config['admin_password'] = $newPassword;
+
+        // Write the updated config back to the file
+        file_put_contents('config.php', '<?php return ' . var_export($config, true) . ';');
+
+        echo json_encode(['success' => true]);
+        exit();
     }
 }
 ?>
-
 
 <!DOCTYPE html>
 <html>
@@ -208,9 +246,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
 </head>
 <body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="#">L2TP User Manager</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <button class="btn btn-primary nav-link" data-bs-toggle="modal" data-bs-target="#changePasswordModal">Change Password</button>
+                </li>
+                <li class="nav-item">
+                    <form method="post" action="index.php" class="d-inline">
+                        <button type="submit" name="logout" class="btn btn-danger nav-link">Logout</button>
+                    </form>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
 <div class="container mt-5">
+
+
     <h2 class="mb-4 text-center">Manage L2TP Users</h2>
-    <div class="table-responsive">
+     <div class="table-responsive">
         <table class="table table-hover table-bordered text-center">
             <thead class="table-dark">
             <tr>
@@ -354,6 +414,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 </div>
 
+<!-- Change Password Modal -->
+<div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="changePasswordModalLabel">Change Password</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="changePasswordForm">
+                    <div class="mb-3">
+                        <label for="newPassword" class="form-label">New Password</label>
+                        <input type="password" class="form-control" id="newPassword" name="newPassword" required placeholder="Enter new password">
+                    </div>
+                    <div class="mb-3">
+                        <label for="confirmPassword" class="form-label">Confirm Password</label>
+                        <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" required placeholder="Confirm new password">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Change Password</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+
 <script>
     document.getElementById('addUserForm').addEventListener('submit', function(event) {
         event.preventDefault();
@@ -478,6 +564,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     function confirmDelete(index) {
         document.getElementById('deleteIndex').value = index;
     }
+
+    // Handle password change
+    document.getElementById('changePasswordForm').addEventListener('submit', function(event) {
+        event.preventDefault();
+        const newPassword = document.getElementById('newPassword').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+
+        if (newPassword !== confirmPassword) {
+            document.getElementById('errorMessage').textContent = 'Passwords do not match';
+            document.getElementById('errorModal').classList.add('show');
+            document.getElementById('errorModal').style.display = 'block';
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('changePassword', '1');
+        formData.append('newPassword', newPassword);
+
+        fetch('', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Password changed successfully');
+                    document.getElementById('newPassword').value = '';
+                    document.getElementById('confirmPassword').value = '';
+                    document.querySelector('#changePasswordModal .btn-close').click();
+                } else {
+                    document.getElementById('errorMessage').textContent = 'Failed to change password';
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
+                }
+            });
+    });
 </script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
