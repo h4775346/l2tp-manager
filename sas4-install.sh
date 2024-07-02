@@ -39,9 +39,9 @@ Alias /l2tp-manager $TARGET_DIR
 EOT
 )
 
-# Add the new Alias and Directory block to the Apache configuration if it does not already exist
+# Add the new Alias and Directory block above the existing Alias /user/api block
 if ! grep -q "/l2tp-manager/" $APACHE_CONF; then
-    awk -v insert="$ALIAS_BLOCK" '/ProxyRequests off/ {print; print insert; next}1' $APACHE_CONF > /tmp/sas4.conf && mv /tmp/sas4.conf $APACHE_CONF
+    awk -v insert="$ALIAS_BLOCK" '/Alias \/user\/api \/opt\/sas4\/site\/user\/backend\/public\// {print insert; print} !/Alias \/user\/api \/opt\/sas4\/site\/user\/backend\/public\// {print}' $APACHE_CONF > /tmp/sas4.conf && mv /tmp/sas4.conf $APACHE_CONF
 fi
 
 # Restart Apache to apply the changes
