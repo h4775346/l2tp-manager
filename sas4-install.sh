@@ -16,8 +16,7 @@ if [ ! -d "$TARGET_DIR" ]; then
 else
     echo "Directory $TARGET_DIR already exists. Stashing local changes and pulling the latest changes."
     cd $TARGET_DIR
-    git config --global --add safe.directory $TARGET_DIR
-    git stash
+    git config --add safe.directory $TARGET_DIR
     git pull
 fi
 
