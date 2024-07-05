@@ -15,8 +15,8 @@ if [ ! -d "$TARGET_DIR" ]; then
     git clone $REPO_URL $TARGET_DIR
 else
     echo "Directory $TARGET_DIR already exists. Stashing local changes and pulling the latest changes."
-    cd $TARGET_DIR
     git config --global --add safe.directory $TARGET_DIR
+    cd $TARGET_DIR
     git stash
     git pull
 fi
