@@ -3,6 +3,7 @@ include 'header.php';
 
 session_start();
 
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $config = include 'config.php';
     $username = $_POST['username'];
