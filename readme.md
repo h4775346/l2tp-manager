@@ -5,12 +5,16 @@
 2- Run The Following Script
 
 
-# To Full Install L2tp Server With Configurations And Gui
+# l2tp Manager Gui And Full Installation
+
+
+## To Full Install L2tp Server With Configurations And Gui
+
 ```
 curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-l2tp-full-installer.sh | sudo bash
 ```
 
-#To Install Only Gui
+## To Install Only Gui
 ```
 curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-install.sh | sudo bash
 ```
