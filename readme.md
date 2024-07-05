@@ -14,5 +14,5 @@ curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-ins
 http://______sas_ip______/l2tp-manager/
 ```
 
-💥 Make Sure you has installed l2tp server
+💥 Make Sure you have installed l2tp server
 
