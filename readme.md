@@ -9,7 +9,7 @@
 
 
 ## To Full Install L2tp Server With Configurations And Gui
-
+#### ❌❌ Careful Running This Script Will Remove All Old Configs and l2tp users if they exits  
 ```
 curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-l2tp-full-installer.sh | sudo bash
 ```
