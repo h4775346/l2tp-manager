@@ -73,6 +73,12 @@ sudo bash -c 'cat > /etc/ppp/chap-secrets <<EOF
 # Secrets for authentication using CHAP
 # client    server    secret    IP addresses
 user1       *         ikasgfiuasgf  10.255.10.11
+user2       *         segheregtyeb  10.255.10.12
+user3       *         ba35rtyegbas  10.255.10.13
+user4       *         rtyasergbrge  10.255.10.14
+user5       *         vwehyaevwgfw  10.255.10.15
+user6       *         bwrvwefbtbwf  10.255.10.16
+user7       *         wlihfqbeuihf  10.255.10.17
 EOF'
 
 # Enable IP forwarding
