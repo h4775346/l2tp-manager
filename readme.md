@@ -21,8 +21,11 @@ curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-ins
 ## Then You are ready to go
 
 ```
-http://______sas_ip______/l2tp-manager/
+http://______sas_ip______:8090/l2tp-manager/
 ```
 
 💥 Make Sure you have installed l2tp server
+
+🗝️ Default username admin
+🗝️ Default password change@me
 
