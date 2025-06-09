@@ -23,6 +23,9 @@ curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-ins
 ```
 http://______sas_ip______:8090/l2tp-manager/
 ```
+```
+https://______sas_ip______:8099/l2tp-manager/
+```
 
 💥 Make Sure you have installed l2tp server
 
