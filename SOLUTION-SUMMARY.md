@@ -102,6 +102,17 @@ The web interface has been extended with:
 - All security considerations have been addressed (sudoers configuration, input validation)
 - Fixed sysctl configuration issue with rp_filter for PPP interfaces
 
+## Recent Fixes
+
+### Route Addition Issue
+- Fixed issue where routes were added to configuration file but not immediately applied to routing table
+- Added automatic route application after successful addition through web interface
+
+### Route Deletion Issue
+- Fixed issue where routes were removed from configuration file but persisted in routing table
+- Enhanced `del_route` function to remove routes from both configuration file and actual routing table
+- Added proper error handling and warnings when PPP interface is not found
+
 ## Troubleshooting
 
 ### Sysctl Configuration

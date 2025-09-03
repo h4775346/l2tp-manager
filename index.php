@@ -174,14 +174,47 @@ function addPeerRoute($peerIp, $destination, $gateway = null) {
         $command .= " --gw " . escapeshellarg($gateway);
     }
     
-    
     return executeRouteCommand($command);
 }
 
 // Function to delete a route
 function deletePeerRoute($peerIp, $destination) {
+    // First delete from the file
     $command = "del --peer " . escapeshellarg($peerIp) . " --dst " . escapeshellarg($destination);
-    return executeRouteCommand($command);
+    $result = executeRouteCommand($command);
+    
+    // Then delete from the actual routing table
+    if ($result['returnCode'] === 0) {
+        // Get the PPP interface for this peer
+        $pppInterface = getPPPInterfaceForPeer($peerIp);
+        if ($pppInterface) {
+            // Delete the route from the actual routing table
+            $deleteCommand = "sudo ip route del " . escapeshellarg($destination) . " dev " . escapeshellarg($pppInterface) . " 2>&1";
+            exec($deleteCommand, $output, $returnCode);
+            // We don't return this result as the main operation (deleting from file) was successful
+        }
+    }
+    
+    return $result;
+}
+
+// Function to get PPP interface for a peer IP
+function getPPPInterfaceForPeer($peerIp) {
+    $command = "ip link show | grep ppp | cut -d: -f2 | tr -d ' '";
+    exec($command, $interfaces, $returnCode);
+    
+    if ($returnCode === 0 && !empty($interfaces)) {
+        foreach ($interfaces as $interface) {
+            // Check if this interface has the peer IP
+            $addrCommand = "ip addr show " . escapeshellarg($interface) . " | grep 'peer " . escapeshellarg($peerIp) . "'";
+            exec($addrCommand, $output, $addrReturnCode);
+            if ($addrReturnCode === 0) {
+                return $interface;
+            }
+        }
+    }
+    
+    return null;
 }
 
 // Function to apply routes for a peer
@@ -302,6 +335,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $gateway = !empty($_POST['gateway']) ? $_POST['gateway'] : null;
 
         $result = addPeerRoute($peerIp, $destination, $gateway);
+        
+        // If route was added successfully, automatically apply it
+        if ($result['returnCode'] === 0) {
+            $applyResult = applyPeerRoutes($peerIp);
+            // Combine the results
+            $result['applyOutput'] = $applyResult['output'];
+            $result['applyReturnCode'] = $applyResult['returnCode'];
+        }
+        
         echo json_encode($result);
         exit();
     } elseif (isset($_POST['deleteRoute'])) {
@@ -861,31 +903,24 @@ $allRoutes = getPeerRoutes();
         formData.append('destination', destination);
         if (gateway) formData.append('gateway', gateway);
 
+        // Show loading indicator
+        const submitButton = document.querySelector('#addRouteForm button[type="submit"]');
+        const originalButtonText = submitButton.textContent;
+        submitButton.textContent = 'Adding...';
+        submitButton.disabled = true;
+
         fetch('', {
             method: 'POST',
             body: formData
         }).then(response => response.json())
             .then(data => {
                 if (data.returnCode === 0) {
-                    // Route added successfully, now apply it
-                    const applyFormData = new FormData();
-                    applyFormData.append('applyRoutes', '1');
-                    applyFormData.append('peerIp', peerIp);
-                    
-                    return fetch('', {
-                        method: 'POST',
-                        body: applyFormData
-                    }).then(response => response.json());
-                } else {
-                    // Error adding route
-                    throw new Error('Error adding route: ' + data.output);
-                }
-            })
-            .then(data => {
-                if (data.returnCode === 0) {
-                    // Success
+                    // Success - refresh the routes display
                     document.getElementById('addRouteForm').reset();
                     refreshRoutes();
+                    // Refresh the routes in the table as well
+                    refreshAllRoutes();
+                    
                     // Show success message
                     document.getElementById('errorMessage').textContent = 'Route added and applied successfully';
                     document.getElementById('errorModal').classList.add('show');
@@ -894,19 +929,27 @@ $allRoutes = getPeerRoutes();
                         document.getElementById('errorModal').classList.remove('show');
                         document.getElementById('errorModal').style.display = 'none';
                     };
-                    
-                    // Refresh the routes in the table as well
-                    refreshAllRoutes();
                 } else {
-                    // Error applying route
-                    throw new Error('Error applying route: ' + data.output);
+                    // Error
+                    let errorMessage = 'Error adding route: ' + data.output;
+                    if (data.applyOutput) {
+                        errorMessage += '\nApply result: ' + data.applyOutput;
+                    }
+                    document.getElementById('errorMessage').textContent = errorMessage;
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
                 }
             })
             .catch(error => {
                 // Error
-                document.getElementById('errorMessage').textContent = error.message;
+                document.getElementById('errorMessage').textContent = 'Network error: ' + error.message;
                 document.getElementById('errorModal').classList.add('show');
                 document.getElementById('errorModal').style.display = 'block';
+            })
+            .finally(() => {
+                // Restore button state
+                submitButton.textContent = originalButtonText;
+                submitButton.disabled = false;
             });
     });
 
@@ -993,6 +1036,17 @@ $allRoutes = getPeerRoutes();
                     refreshUserRoutes(peerIp, rowIndex);
                     // Also refresh the routes modal if it's open
                     refreshRoutes();
+                    
+                    // Show success message
+                    const successElement = document.createElement('div');
+                    successElement.className = 'text-success mt-1';
+                    successElement.textContent = 'Route deleted successfully';
+                    contentElement.parentNode.insertBefore(successElement, contentElement.nextSibling);
+                    setTimeout(() => {
+                        if (successElement.parentNode) {
+                            successElement.parentNode.removeChild(successElement);
+                        }
+                    }, 3000);
                 } else {
                     contentElement.innerHTML = originalContent;
                     alert('Error deleting route: ' + data.output);

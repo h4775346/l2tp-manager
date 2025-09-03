@@ -48,7 +48,7 @@ validate_ip() {
 # Function to validate CIDR
 validate_cidr() {
     local cidr=$1
-    if [[ $cidr =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+    if [[ $cidr =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,2}$ ]]; then
         local ip=$(echo $cidr | cut -d'/' -f1)
         local prefix=$(echo $cidr | cut -d'/' -f2)
         if validate_ip $ip && [[ $prefix -ge 0 && $prefix -le 32 ]]; then
@@ -133,12 +133,64 @@ del_route() {
         return 0
     fi
     
-    # Count how many routes match before deletion
-    local count=$(grep -c "^$dst_cidr" "$routes_file" 2>/dev/null || echo "0")
+    # Find the full route entry to get gateway and device information
+    local route_entry=$(grep "^$dst_cidr" "$routes_file" | head -n 1)
     
-    if [[ $count -eq 0 ]]; then
+    if [[ -z "$route_entry" ]]; then
         echo "No route found with destination: $dst_cidr"
         return 0
+    fi
+    
+    # Extract gateway and device from the route entry
+    local gateway=$(echo "$route_entry" | grep -o 'via [0-9.]*' | awk '{print $2}')
+    local device=$(echo "$route_entry" | grep -o 'dev [a-zA-Z0-9]*' | awk '{print $2}')
+    
+    # Set default gateway to peer IP if not provided in route entry
+    if [[ -z "$gateway" ]]; then
+        gateway=$peer_ip
+    fi
+    
+    # Try to delete from the actual routing table
+    local ppp_interface=""
+    for iface in /sys/class/net/ppp*; do
+        if [[ -d "$iface" ]]; then
+            local iface_name=$(basename "$iface")
+            # Get the peer IP for this interface
+            if ip addr show $iface_name | grep -q "peer $peer_ip"; then
+                ppp_interface=$iface_name
+                break
+            fi
+        fi
+    done
+    
+    if [[ -n "$ppp_interface" ]]; then
+        # Construct ip route delete command
+        local cmd="ip route del $dst_cidr"
+        if [[ -n "$device" ]]; then
+            cmd="$cmd dev $device"
+        else
+            cmd="$cmd dev $ppp_interface"
+        fi
+        
+        # Execute command to delete from routing table
+        echo "Executing: $cmd"
+        if eval $cmd 2>/dev/null; then
+            echo "Deleted route from routing table: $dst_cidr"
+        else
+            # Try without dev parameter if it fails
+            if [[ -z "$device" ]]; then
+                cmd="ip route del $dst_cidr"
+                if eval $cmd 2>/dev/null; then
+                    echo "Deleted route from routing table: $dst_cidr"
+                else
+                    echo "Warning: Failed to delete route from routing table: $dst_cidr"
+                fi
+            else
+                echo "Warning: Failed to delete route from routing table: $dst_cidr"
+            fi
+        fi
+    else
+        echo "Warning: No PPP interface found for peer $peer_ip. Route may still exist in routing table."
     fi
     
     # Remove route from file
