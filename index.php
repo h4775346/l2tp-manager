@@ -334,6 +334,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $destination = $_POST['destination'];
         $gateway = !empty($_POST['gateway']) ? $_POST['gateway'] : null;
 
+        
         $result = addPeerRoute($peerIp, $destination, $gateway);
         
         // If route was added successfully, automatically apply it
@@ -722,107 +723,120 @@ $allRoutes = getPeerRoutes();
 </div>
 
 <script>
-    document.getElementById('addUserForm').addEventListener('submit', function(event) {
-        event.preventDefault();
-        const client = document.getElementById('client').value;
-        const server = document.getElementById('server').value;
-        const secret = document.getElementById('secret').value;
-        const ip = document.getElementById('manualIpCheck').checked ? document.getElementById('ip').value : '';
+    // Handle user form submission
+    const addUserForm = document.getElementById('addUserForm');
+    if (addUserForm) {
+        addUserForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const client = document.getElementById('client').value;
+            const server = document.getElementById('server').value;
+            const secret = document.getElementById('secret').value;
+            const ip = document.getElementById('manualIpCheck').checked ? document.getElementById('ip').value : '';
 
-        const formData = new FormData();
-        formData.append('add', '1');
-        formData.append('client', client);
-        formData.append('server', server);
-        formData.append('secret', secret);
-        if (ip) formData.append('ip', ip);
+            const formData = new FormData();
+            formData.append('add', '1');
+            formData.append('client', client);
+            formData.append('server', server);
+            formData.append('secret', secret);
+            if (ip) formData.append('ip', ip);
 
-        fetch('', {
-            method: 'POST',
-            body: formData
-        }).then(response => response.json())  // Expecting JSON response from the server
-            .then(data => {
-                if (data.error) {
-                    document.getElementById('errorMessage').textContent = data.error;
-                    document.getElementById('errorModal').classList.add('show');
-                    document.getElementById('errorModal').style.display = 'block';
-                } else {
-                    const newRow = document.createElement('tr');
-                    newRow.classList.add('fade-in');
-                    const newIndex = document.getElementById('userTable').rows.length;
-                    newRow.id = `user-${newIndex}`;
-                    newRow.innerHTML = `
-                  <td>${client}</td>
-                  <td>${server}</td>
-                  <td>${secret}</td>
-                  <td>${data.ip}</td>  <!-- Use the IP returned from the server -->
-                  <td>No routes</td>
-                  <td>
-                      <button class="btn btn-danger btn-sm" onclick="confirmDelete(${newIndex})" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
-                  </td>
-              `;
-                    document.getElementById('userTable').appendChild(newRow);
-                    resetForm();
-                    document.querySelector('#userModal .btn-close').click();
-                }
-            });
-    });
+            fetch('', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.json())  // Expecting JSON response from the server
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('errorMessage').textContent = data.error;
+                        document.getElementById('errorModal').classList.add('show');
+                        document.getElementById('errorModal').style.display = 'block';
+                    } else {
+                        const newRow = document.createElement('tr');
+                        newRow.classList.add('fade-in');
+                        const newIndex = document.getElementById('userTable').rows.length;
+                        newRow.id = `user-${newIndex}`;
+                        newRow.innerHTML = `
+                      <td>${client}</td>
+                      <td>${server}</td>
+                      <td>${secret}</td>
+                      <td>${data.ip}</td>  <!-- Use the IP returned from the server -->
+                      <td>No routes</td>
+                      <td>
+                          <button class="btn btn-danger btn-sm" onclick="confirmDelete(${newIndex})" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
+                      </td>
+                  `;
+                        document.getElementById('userTable').appendChild(newRow);
+                        resetForm();
+                        document.querySelector('#userModal .btn-close').click();
+                    }
+                });
+        });
+    }
 
     // Close error modal on button click
-    document.getElementById('errorModalClose').addEventListener('click', function() {
-        document.getElementById('errorModal').classList.remove('show');
-        document.getElementById('errorModal').style.display = 'none';
-    });
+    const errorModalClose = document.getElementById('errorModalClose');
+    if (errorModalClose) {
+        errorModalClose.addEventListener('click', function() {
+            document.getElementById('errorModal').classList.remove('show');
+            document.getElementById('errorModal').style.display = 'none';
+        });
+    }
 
-    document.getElementById('addMultipleUsersForm').addEventListener('submit', function(event) {
-        event.preventDefault();
-        const numUsers = document.getElementById('numUsers').value;
-        const ipRangeFrom = document.getElementById('manualIpCheckMultiple').checked ? document.getElementById('ipRangeFrom').value : '';
-        const ipRangeTo = document.getElementById('manualIpCheckMultiple').checked ? document.getElementById('ipRangeTo').value : '';
+    const addMultipleUsersForm = document.getElementById('addMultipleUsersForm');
+    if (addMultipleUsersForm) {
+        addMultipleUsersForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const numUsers = document.getElementById('numUsers').value;
+            const ipRangeFrom = document.getElementById('manualIpCheckMultiple').checked ? document.getElementById('ipRangeFrom').value : '';
+            const ipRangeTo = document.getElementById('manualIpCheckMultiple').checked ? document.getElementById('ipRangeTo').value : '';
 
-        const formData = new FormData();
-        formData.append('addMultiple', '1');
-        formData.append('numUsers', numUsers);
-        if (ipRangeFrom && ipRangeTo) {
-            formData.append('ipRangeFrom', ipRangeFrom);
-            formData.append('ipRangeTo', ipRangeTo);
-        }
+            const formData = new FormData();
+            formData.append('addMultiple', '1');
+            formData.append('numUsers', numUsers);
+            if (ipRangeFrom && ipRangeTo) {
+                formData.append('ipRangeFrom', ipRangeFrom);
+                formData.append('ipRangeTo', ipRangeTo);
+            }
 
-        fetch('', {
-            method: 'POST',
-            body: formData
-        }).then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    document.getElementById('errorMessage').textContent = data.error;
-                    document.getElementById('errorModal').classList.add('show');
-                    document.getElementById('errorModal').style.display = 'block';
-                } else {
-                    location.reload();
-                }
-            });
-    });
+            fetch('', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('errorMessage').textContent = data.error;
+                        document.getElementById('errorModal').classList.add('show');
+                        document.getElementById('errorModal').style.display = 'block';
+                    } else {
+                        location.reload();
+                    }
+                });
+        });
+    }
 
-    document.getElementById('deleteUserForm').addEventListener('submit', function(event) {
-        event.preventDefault();
-        const index = document.getElementById('deleteIndex').value;
+    const deleteUserForm = document.getElementById('deleteUserForm');
+    if (deleteUserForm) {
+        deleteUserForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const index = document.getElementById('deleteIndex').value;
 
-        const formData = new FormData();
-        formData.append('delete', '1');
-        formData.append('index', index);
+            const formData = new FormData();
+            formData.append('delete', '1');
+            formData.append('index', index);
 
-        fetch('', {
-            method: 'POST',
-            body: formData
-        }).then(response => response.text())
-            .then(data => {
-                const row = document.getElementById(`user-${index}`);
-                row.classList.add('fade-out');
-                setTimeout(() => {
-                    if (row) row.remove();
-                    document.querySelector('#confirmDeleteModal .btn-close').click();
-                }, 500);
-            });
-    });
+            fetch('', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.text())
+                .then(data => {
+                    const row = document.getElementById(`user-${index}`);
+                    row.classList.add('fade-out');
+                    setTimeout(() => {
+                        if (row) row.remove();
+                        document.querySelector('#confirmDeleteModal .btn-close').click();
+                    }, 500);
+                });
+        });
+    }
 
     function resetForm() {
         document.getElementById('client').value = '';
@@ -848,112 +862,125 @@ $allRoutes = getPeerRoutes();
     }
 
     // Handle password change
-    document.getElementById('changePasswordForm').addEventListener('submit', function(event) {
-        event.preventDefault();
-        const newPassword = document.getElementById('newPassword').value;
-        const confirmPassword = document.getElementById('confirmPassword').value;
+    const changePasswordForm = document.getElementById('changePasswordForm');
+    if (changePasswordForm) {
+        changePasswordForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
 
-        if (newPassword !== confirmPassword) {
-            document.getElementById('errorMessage').textContent = 'Passwords do not match';
-            document.getElementById('errorModal').classList.add('show');
-            document.getElementById('errorModal').style.display = 'block';
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('changePassword', '1');
-        formData.append('newPassword', newPassword);
-
-        fetch('', {
-            method: 'POST',
-            body: formData
-        }).then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('Password changed successfully');
-                    document.getElementById('newPassword').value = '';
-                    document.getElementById('confirmPassword').value = '';
-                    document.querySelector('#changePasswordModal .btn-close').click();
-                } else {
-                    document.getElementById('errorMessage').textContent = 'Failed to change password';
-                    document.getElementById('errorModal').classList.add('show');
-                    document.getElementById('errorModal').style.display = 'block';
-                }
-            });
-    });
-
-    // Handle route management
-    document.getElementById('addRouteForm').addEventListener('submit', function(event) {
-        event.preventDefault();
-        const peerIp = document.getElementById('routePeerIp').value;
-        const destination = document.getElementById('routeDestination').value;
-        const gateway = document.getElementById('routeGateway').value;
-
-        if (!peerIp || !destination) {
-            document.getElementById('errorMessage').textContent = 'Peer IP and Destination are required';
-            document.getElementById('errorModal').classList.add('show');
-            document.getElementById('errorModal').style.display = 'block';
-            return;
-        }
-
-        // First, add the route
-        const formData = new FormData();
-        formData.append('addRoute', '1');
-        formData.append('peerIp', peerIp);
-        formData.append('destination', destination);
-        if (gateway) formData.append('gateway', gateway);
-
-        // Show loading indicator
-        const submitButton = document.querySelector('#addRouteForm button[type="submit"]');
-        const originalButtonText = submitButton.textContent;
-        submitButton.textContent = 'Adding...';
-        submitButton.disabled = true;
-
-        fetch('', {
-            method: 'POST',
-            body: formData
-        }).then(response => response.json())
-            .then(data => {
-                if (data.returnCode === 0) {
-                    // Success - refresh the routes display
-                    document.getElementById('addRouteForm').reset();
-                    refreshRoutes();
-                    // Refresh the routes in the table as well
-                    refreshAllRoutes();
-                    
-                    // Show success message
-                    document.getElementById('errorMessage').textContent = 'Route added and applied successfully';
-                    document.getElementById('errorModal').classList.add('show');
-                    document.getElementById('errorModal').style.display = 'block';
-                    document.getElementById('errorModalClose').onclick = function() {
-                        document.getElementById('errorModal').classList.remove('show');
-                        document.getElementById('errorModal').style.display = 'none';
-                    };
-                } else {
-                    // Error
-                    let errorMessage = 'Error adding route: ' + data.output;
-                    if (data.applyOutput) {
-                        errorMessage += '\nApply result: ' + data.applyOutput;
-                    }
-                    document.getElementById('errorMessage').textContent = errorMessage;
-                    document.getElementById('errorModal').classList.add('show');
-                    document.getElementById('errorModal').style.display = 'block';
-                }
-            })
-            .catch(error => {
-                // Error
-                document.getElementById('errorMessage').textContent = 'Network error: ' + error.message;
+            if (newPassword !== confirmPassword) {
+                document.getElementById('errorMessage').textContent = 'Passwords do not match';
                 document.getElementById('errorModal').classList.add('show');
                 document.getElementById('errorModal').style.display = 'block';
-            })
-            .finally(() => {
-                // Restore button state
-                submitButton.textContent = originalButtonText;
-                submitButton.disabled = false;
-            });
-    });
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('changePassword', '1');
+            formData.append('newPassword', newPassword);
+
+            fetch('', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Password changed successfully');
+                        document.getElementById('newPassword').value = '';
+                        document.getElementById('confirmPassword').value = '';
+                        document.querySelector('#changePasswordModal .btn-close').click();
+                    } else {
+                        document.getElementById('errorMessage').textContent = 'Failed to change password';
+                        document.getElementById('errorModal').classList.add('show');
+                        document.getElementById('errorModal').style.display = 'block';
+                    }
+                });
+        });
+    }
+
+    // Handle route management
+    const addRouteForm = document.getElementById('addRouteForm');
+    if (addRouteForm) {
+        addRouteForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const peerIp = document.getElementById('routePeerIp').value;
+            const destination = document.getElementById('routeDestination').value;
+            const gateway = document.getElementById('routeGateway').value;
+
+            if (!peerIp || !destination) {
+                document.getElementById('errorMessage').textContent = 'Peer IP and Destination are required';
+                document.getElementById('errorModal').classList.add('show');
+                document.getElementById('errorModal').style.display = 'block';
+                return;
+            }
+
+            // First, add the route
+            const formData = new FormData();
+            formData.append('addRoute', '1');
+            formData.append('peerIp', peerIp);
+            formData.append('destination', destination);
+            if (gateway) formData.append('gateway', gateway);
+
+            // Show loading indicator
+            const submitButton = document.querySelector('#addRouteForm button[type="submit"]');
+            const originalButtonText = submitButton.textContent;
+            submitButton.textContent = 'Adding...';
+            submitButton.disabled = true;
+
+            fetch('', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.json())
+                .then(data => {
+                    if (data.returnCode === 0) {
+                        // Success - refresh the routes display
+                        document.getElementById('addRouteForm').reset();
+                        refreshRoutes();
+                        // Refresh the routes in the table as well
+                        refreshAllRoutes();
+                        
+                        // Show success message
+                        document.getElementById('errorMessage').textContent = 'Route added and applied successfully';
+                        document.getElementById('errorModal').classList.add('show');
+                        document.getElementById('errorModal').style.display = 'block';
+                        document.getElementById('errorModalClose').onclick = function() {
+                            document.getElementById('errorModal').classList.remove('show');
+                            document.getElementById('errorModal').style.display = 'none';
+                        };
+                    } else {
+                        // Error
+                        let errorMessage = 'Error adding route: ' + data.output;
+                        if (data.applyOutput) {
+                            errorMessage += '\nApply result: ' + data.applyOutput;
+                        }
+                        document.getElementById('errorMessage').textContent = errorMessage;
+                        document.getElementById('errorModal').classList.add('show');
+                        document.getElementById('errorModal').style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    // Error
+                    document.getElementById('errorMessage').textContent = 'Network error: ' + error.message;
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
+                })
+                .finally(() => {
+                    // Restore button state
+                    submitButton.textContent = originalButtonText;
+                    submitButton.disabled = false;
+                });
+        });
+    }
 
     function refreshRoutes() {
+        // Check if routesList element exists
+        const routesList = document.getElementById('routesList');
+        if (!routesList) {
+            console.error('Routes list element not found');
+            return;
+        }
+        
         fetch('', {
             method: 'POST',
             headers: {
@@ -963,6 +990,10 @@ $allRoutes = getPeerRoutes();
         }).then(response => response.text())
             .then(data => {
                 document.getElementById('routesList').textContent = data;
+            })
+            .catch(error => {
+                console.error('Error refreshing routes:', error);
+                routesList.textContent = 'Error loading routes';
             });
     }
 
@@ -981,6 +1012,12 @@ $allRoutes = getPeerRoutes();
                 } else {
                     document.getElementById('errorMessage').textContent = 'Error applying routes: ' + data.output;
                 }
+                document.getElementById('errorModal').classList.add('show');
+                document.getElementById('errorModal').style.display = 'block';
+            })
+            .catch(error => {
+                console.error('Error applying routes:', error);
+                document.getElementById('errorMessage').textContent = 'Network error applying routes: ' + error.message;
                 document.getElementById('errorModal').classList.add('show');
                 document.getElementById('errorModal').style.display = 'block';
             });
@@ -1012,6 +1049,7 @@ $allRoutes = getPeerRoutes();
         // Extract destination from route (first part before space)
         const destination = route.split(' ')[0];
         
+        // Check if confirmation is needed
         if (!confirm('Are you sure you want to delete this route?\n' + destination)) {
             return;
         }
@@ -1021,8 +1059,15 @@ $allRoutes = getPeerRoutes();
         formData.append('peerIp', peerIp);
         formData.append('destination', destination);
         
-        // Show loading indicator
+        // Check if routes content element exists
         const contentElement = document.getElementById('routes-content-' + rowIndex);
+        if (!contentElement) {
+            console.error('Routes content element not found for row index:', rowIndex);
+            alert('Error: Could not find routes display element');
+            return;
+        }
+        
+        // Show loading indicator
         const originalContent = contentElement.innerHTML;
         contentElement.innerHTML = '<div class="text-muted">Deleting route...</div>';
         
@@ -1062,6 +1107,12 @@ $allRoutes = getPeerRoutes();
     // Function to apply routes for a specific user
     function applyRoutes(peerIp, rowIndex) {
         const contentElement = document.getElementById('routes-content-' + rowIndex);
+        if (!contentElement) {
+            console.error('Routes content element not found for row index:', rowIndex);
+            alert('Error: Could not find routes display element');
+            return;
+        }
+        
         const originalContent = contentElement.innerHTML;
         contentElement.innerHTML = '<div class="text-muted">Applying routes...</div>';
         
@@ -1101,6 +1152,11 @@ $allRoutes = getPeerRoutes();
     // Function to refresh routes for a specific user
     function refreshUserRoutes(peerIp, rowIndex) {
         const contentElement = document.getElementById('routes-content-' + rowIndex);
+        if (!contentElement) {
+            console.error('Routes content element not found for row index:', rowIndex);
+            return;
+        }
+        
         contentElement.innerHTML = '<div class="text-muted">Loading...</div>';
         
         // Get the actual routes array
