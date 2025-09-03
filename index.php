@@ -132,12 +132,21 @@ function getPeerRoutesArray($peerIp) {
                 continue;
             }
             // Add valid route lines (lines containing network routes)
-            if (preg_match('/^\d+\.\d+\.\d+\.\d+\/\d+/', $line)) {
+            // A route line typically looks like: "192.168.1.0/24 via 10.255.10.11"
+            if (preg_match('/^\d+\.\d+\.\d+\.\d+\/\d+/', trim($line))) {
                 $routes[] = trim($line);
             }
         }
     }
     return $routes;
+}
+
+// Function to extract destination from a route string
+function getRouteDestination($route) {
+    // A route string looks like: "192.168.1.0/24 via 10.255.10.11"
+    // We want to extract just the destination part: "192.168.1.0/24"
+    $parts = explode(' ', $route);
+    return $parts[0];
 }
 
 // Function to get a formatted string of routes for display
@@ -323,6 +332,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         echo json_encode($allRoutes);
         exit();
+    } elseif (isset($_POST['getUserRoutesArray'])) {
+        $peerIp = $_POST['peerIp'];
+        $routes = getPeerRoutesArray($peerIp);
+        echo json_encode(['routes' => $routes]);
+        exit();
+    } elseif (isset($_POST['getAllUsersRoutesArray'])) {
+        $allRoutes = [];
+        foreach ($users as $user) {
+            $allRoutes[$user['ip']] = ['routes' => getPeerRoutesArray($user['ip'])];
+        }
+        echo json_encode($allRoutes);
+        exit();
     }
 }
 
@@ -369,17 +390,84 @@ $allRoutes = getPeerRoutes();
         
         .routes-cell {
             text-align: left;
-            white-space: pre-line;
-            max-width: 200px;
+            max-width: 250px;
             word-wrap: break-word;
             font-size: 0.85em;
             position: relative;
         }
         
         .routes-content {
-            max-height: 80px;
+            max-height: 100px;
             overflow-y: auto;
-            padding-right: 10px;
+            padding: 8px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            font-family: monospace;
+        }
+        
+        .route-actions {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        
+        .route-item {
+            background-color: #e9ecef;
+            padding: 4px 8px;
+            margin: 2px 0;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .route-text {
+            flex-grow: 1;
+            word-break: break-all;
+        }
+        
+        .route-delete-btn {
+            margin-left: 5px;
+            padding: 0 5px;
+            font-size: 0.8em;
+        }
+        
+        .user-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .table th {
+            background-color: #343a40;
+            color: white;
+        }
+        
+        .table-hover tbody tr:hover {
+            background-color: rgba(0,0,0,.075);
+        }
+        
+        .btn-sm {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+        }
+        
+        .refresh-btn {
+            background-color: #6c757d;
+            border: none;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        
+        .refresh-btn:hover {
+            background-color: #5a6268;
         }
     </style>
 </head>
@@ -416,7 +504,7 @@ $allRoutes = getPeerRoutes();
                 <th>Server</th>
                 <th>Password</th>
                 <th>IP Address</th>
-                <th>Routes <button class="btn btn-sm btn-outline-light ms-2" onclick="refreshAllRoutes()" title="Refresh all routes">↻</button></th>
+                <th>Routes <button class="refresh-btn" onclick="refreshAllRoutes()" title="Refresh all routes">↻</button></th>
                 <th>Actions</th>
             </tr>
             </thead>
@@ -428,11 +516,31 @@ $allRoutes = getPeerRoutes();
                     <td><?php echo htmlspecialchars($user['secret']); ?></td>
                     <td><?php echo htmlspecialchars($user['ip']); ?></td>
                     <td class="routes-cell">
-                        <div class="routes-content"><?php echo htmlspecialchars($user['routes']); ?></div>
-                        <button class="btn btn-sm btn-outline-primary mt-1" onclick="refreshUserRoutes('<?php echo $user['ip']; ?>', this.parentElement)" title="Refresh routes">↻</button>
+                        <div class="routes-content" id="routes-content-<?php echo $index; ?>">
+                            <?php 
+                            $routes = getPeerRoutesArray($user['ip']);
+                            if (empty($routes)): 
+                            ?>
+                                <div class="text-muted">No routes configured</div>
+                            <?php else: ?>
+                                <?php foreach ($routes as $route): ?>
+                                    <div class="route-item">
+                                        <span class="route-text"><?php echo htmlspecialchars($route); ?></span>
+                                        <button class="btn btn-danger btn-sm route-delete-btn" onclick="deleteRoute('<?php echo $user['ip']; ?>', '<?php echo htmlspecialchars(addslashes($route)); ?>', <?php echo $index; ?>)" title="Delete route">×</button>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                        <div class="route-actions">
+                            <button class="btn btn-sm btn-outline-primary" onclick="openAddRouteModal('<?php echo $user['ip']; ?>', '<?php echo htmlspecialchars(addslashes($user['client'])); ?>')" title="Add route">+ Add Route</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="applyRoutes('<?php echo $user['ip']; ?>', <?php echo $index; ?>)" title="Apply routes">▶ Apply</button>
+                            <button class="btn btn-sm btn-outline-info" onclick="refreshUserRoutes('<?php echo $user['ip']; ?>', <?php echo $index; ?>)" title="Refresh routes">↻</button>
+                        </div>
                     </td>
                     <td>
-                        <button class="btn btn-danger btn-sm" onclick="confirmDelete(<?php echo $index; ?>)" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
+                        <div class="user-actions">
+                            <button class="btn btn-danger btn-sm" onclick="confirmDelete(<?php echo $index; ?>)" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete User</button>
+                        </div>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -746,6 +854,7 @@ $allRoutes = getPeerRoutes();
             return;
         }
 
+        // First, add the route
         const formData = new FormData();
         formData.append('addRoute', '1');
         formData.append('peerIp', peerIp);
@@ -758,23 +867,46 @@ $allRoutes = getPeerRoutes();
         }).then(response => response.json())
             .then(data => {
                 if (data.returnCode === 0) {
+                    // Route added successfully, now apply it
+                    const applyFormData = new FormData();
+                    applyFormData.append('applyRoutes', '1');
+                    applyFormData.append('peerIp', peerIp);
+                    
+                    return fetch('', {
+                        method: 'POST',
+                        body: applyFormData
+                    }).then(response => response.json());
+                } else {
+                    // Error adding route
+                    throw new Error('Error adding route: ' + data.output);
+                }
+            })
+            .then(data => {
+                if (data.returnCode === 0) {
                     // Success
                     document.getElementById('addRouteForm').reset();
                     refreshRoutes();
                     // Show success message
-                    document.getElementById('errorMessage').textContent = 'Route added successfully';
+                    document.getElementById('errorMessage').textContent = 'Route added and applied successfully';
                     document.getElementById('errorModal').classList.add('show');
                     document.getElementById('errorModal').style.display = 'block';
                     document.getElementById('errorModalClose').onclick = function() {
                         document.getElementById('errorModal').classList.remove('show');
                         document.getElementById('errorModal').style.display = 'none';
                     };
+                    
+                    // Refresh the routes in the table as well
+                    refreshAllRoutes();
                 } else {
-                    // Error
-                    document.getElementById('errorMessage').textContent = 'Error adding route: ' + data.output;
-                    document.getElementById('errorModal').classList.add('show');
-                    document.getElementById('errorModal').style.display = 'block';
+                    // Error applying route
+                    throw new Error('Error applying route: ' + data.output);
                 }
+            })
+            .catch(error => {
+                // Error
+                document.getElementById('errorMessage').textContent = error.message;
+                document.getElementById('errorModal').classList.add('show');
+                document.getElementById('errorModal').style.display = 'block';
             });
     });
 
@@ -811,26 +943,152 @@ $allRoutes = getPeerRoutes();
             });
     }
 
-    function refreshAllRoutes() {
-        location.reload();
+    // Function to open the add route modal with pre-filled peer IP
+    function openAddRouteModal(peerIp, username) {
+        // Set the peer IP in the route modal
+        const peerSelect = document.getElementById('routePeerIp');
+        for (let i = 0; i < peerSelect.options.length; i++) {
+            if (peerSelect.options[i].value === peerIp) {
+                peerSelect.selectedIndex = i;
+                break;
+            }
+        }
+        
+        // Update the modal title to show which user we're adding routes for
+        const modalTitle = document.querySelector('#routesModalLabel');
+        const originalTitle = "User Routes Management";
+        modalTitle.textContent = originalTitle + ' - ' + username + ' (' + peerIp + ')';
+        
+        // Show the modal
+        const routesModal = new bootstrap.Modal(document.getElementById('routesModal'));
+        routesModal.show();
     }
-
-    // Initialize the routes modal with current routes
-    document.getElementById('routesModal').addEventListener('shown.bs.modal', function () {
-        refreshRoutes();
-    });
+    
+    // Function to delete a specific route
+    function deleteRoute(peerIp, route, rowIndex) {
+        // Extract destination from route (first part before space)
+        const destination = route.split(' ')[0];
+        
+        if (!confirm('Are you sure you want to delete this route?\n' + destination)) {
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('deleteRoute', '1');
+        formData.append('peerIp', peerIp);
+        formData.append('destination', destination);
+        
+        // Show loading indicator
+        const contentElement = document.getElementById('routes-content-' + rowIndex);
+        const originalContent = contentElement.innerHTML;
+        contentElement.innerHTML = '<div class="text-muted">Deleting route...</div>';
+        
+        fetch('', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json())
+            .then(data => {
+                if (data.returnCode === 0) {
+                    // Refresh the routes display
+                    refreshUserRoutes(peerIp, rowIndex);
+                    // Also refresh the routes modal if it's open
+                    refreshRoutes();
+                } else {
+                    contentElement.innerHTML = originalContent;
+                    alert('Error deleting route: ' + data.output);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                contentElement.innerHTML = originalContent;
+                alert('Error deleting route');
+            });
+    }
+    
+    // Function to apply routes for a specific user
+    function applyRoutes(peerIp, rowIndex) {
+        const contentElement = document.getElementById('routes-content-' + rowIndex);
+        const originalContent = contentElement.innerHTML;
+        contentElement.innerHTML = '<div class="text-muted">Applying routes...</div>';
+        
+        const formData = new FormData();
+        formData.append('applyRoutes', '1');
+        formData.append('peerIp', peerIp);
+        
+        fetch('', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json())
+            .then(data => {
+                if (data.returnCode === 0) {
+                    contentElement.innerHTML = originalContent;
+                    // Show success message
+                    const successElement = document.createElement('div');
+                    successElement.className = 'text-success mt-1';
+                    successElement.textContent = 'Routes applied successfully';
+                    contentElement.parentNode.insertBefore(successElement, contentElement.nextSibling);
+                    setTimeout(() => {
+                        if (successElement.parentNode) {
+                            successElement.parentNode.removeChild(successElement);
+                        }
+                    }, 3000);
+                } else {
+                    contentElement.innerHTML = originalContent;
+                    alert('Error applying routes: ' + data.output);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                contentElement.innerHTML = originalContent;
+                alert('Error applying routes');
+            });
+    }
+    
+    // Function to refresh routes for a specific user
+    function refreshUserRoutes(peerIp, rowIndex) {
+        const contentElement = document.getElementById('routes-content-' + rowIndex);
+        contentElement.innerHTML = '<div class="text-muted">Loading...</div>';
+        
+        // Get the actual routes array
+        const formData = new FormData();
+        formData.append('getUserRoutesArray', '1');
+        formData.append('peerIp', peerIp);
+        
+        fetch('', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json())
+            .then(data => {
+                if (data.routes && Array.isArray(data.routes) && data.routes.length > 0) {
+                    let html = '';
+                    for (const route of data.routes) {
+                        html += `<div class="route-item">
+                                    <span class="route-text">${route}</span>
+                                    <button class="btn btn-danger btn-sm route-delete-btn" onclick="deleteRoute('${peerIp}', '${route.replace(/'/g, "\\'")}', ${rowIndex})" title="Delete route">×</button>
+                                 </div>`;
+                    }
+                    contentElement.innerHTML = html;
+                } else {
+                    contentElement.innerHTML = '<div class="text-muted">No routes configured</div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                contentElement.innerHTML = '<div class="text-danger">Error loading routes</div>';
+            });
+    }
     
     // Function to refresh all routes in the table
     function refreshAllRoutes() {
         // Show a loading indicator
-        const routeCells = document.querySelectorAll('.routes-cell');
-        routeCells.forEach(cell => {
-            cell.textContent = 'Loading...';
+        const routeContentElements = document.querySelectorAll('.routes-cell .routes-content');
+        routeContentElements.forEach(cell => {
+            cell.innerHTML = '<div class="text-muted">Loading...</div>';
         });
         
         // Get updated routes for all users
         const formData = new FormData();
-        formData.append('getAllUsersRoutes', '1');
+        formData.append('getAllUsersRoutesArray', '1');
         
         fetch('', {
             method: 'POST',
@@ -842,44 +1100,30 @@ $allRoutes = getPeerRoutes();
                 rows.forEach(row => {
                     const rowIndex = row.id.split('-')[1];
                     const userIp = row.cells[3].textContent; // IP is in the 4th column (0-indexed)
-                    if (data[userIp]) {
-                        row.cells[4].textContent = data[userIp]; // Routes are in the 5th column
+                    const contentElement = document.getElementById('routes-content-' + rowIndex);
+                    
+                    if (contentElement && data[userIp]) {
+                        if (data[userIp].routes && Array.isArray(data[userIp].routes) && data[userIp].routes.length > 0) {
+                            let html = '';
+                            for (const route of data[userIp].routes) {
+                                html += `<div class="route-item">
+                                            <span class="route-text">${route}</span>
+                                            <button class="btn btn-danger btn-sm route-delete-btn" onclick="deleteRoute('${userIp}', '${route.replace(/'/g, "\\'")}', ${rowIndex})" title="Delete route">×</button>
+                                         </div>`;
+                            }
+                            contentElement.innerHTML = html;
+                        } else {
+                            contentElement.innerHTML = '<div class="text-muted">No routes configured</div>';
+                        }
                     }
                 });
             })
             .catch(error => {
                 console.error('Error refreshing routes:', error);
                 // Restore original content on error
-                routeCells.forEach(cell => {
-                    cell.textContent = 'Error loading routes';
+                routeContentElements.forEach(cell => {
+                    cell.innerHTML = '<div class="text-danger">Error loading routes</div>';
                 });
-            });
-    }
-    
-    // Function to refresh routes for a specific user
-    function refreshUserRoutes(peerIp, cellElement) {
-        // Store the button element
-        const buttonElement = cellElement.querySelector('button');
-        const contentElement = cellElement.querySelector('.routes-content');
-        
-        // Show loading indicator
-        contentElement.textContent = 'Loading...';
-        
-        const formData = new FormData();
-        formData.append('getUserRoutes', '1');
-        formData.append('peerIp', peerIp);
-        
-        fetch('', {
-            method: 'POST',
-            body: formData
-        }).then(response => response.json())
-            .then(data => {
-                // Update the routes text
-                contentElement.textContent = data.routes;
-            })
-            .catch(error => {
-                console.error('Error refreshing routes:', error);
-                contentElement.textContent = 'Error loading routes';
             });
     }
 </script>
