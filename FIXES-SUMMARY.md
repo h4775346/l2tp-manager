@@ -10,6 +10,8 @@ This document summarizes the fixes implemented to address the issues with route 
 
 3. **JavaScript Error**: Uncaught TypeError: Cannot read properties of null (reading 'addEventListener') occurring when elements don't exist on the page.
 
+4. **CIDR Validation Issue**: The CIDR validation regex in the CLI tool was incorrect, causing valid CIDR notations like 192.168.3.0/24 to be rejected.
+
 ## Fixes Implemented
 
 ### 1. Enhanced CLI Tool (`l2tp-routectl`)
@@ -21,6 +23,11 @@ Updated the `del_route` function in `/usr/local/sbin/l2tp-routectl` to:
 - Try to delete from the actual routing table using `ip route del` command
 - Remove route from file
 - Remove file if empty
+
+Fixed the `validate_cidr` function to use the correct regex pattern:
+- Changed from `^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,2}$` 
+- To `^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$`
+- This correctly validates CIDR notation like 192.168.3.0/24
 
 ### 2. PHP Backend Improvements
 
@@ -72,6 +79,21 @@ Updated the web interface JavaScript to:
 - Added console logging for debugging purposes
 - Added fallback behaviors for failed operations
 
+## CIDR Validation Fix
+
+### Issue
+The original regex pattern `^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,2}$` was missing the [/](file://d:\web\l2tp-manager\AI.md) character, causing valid CIDR notations like 192.168.3.0/24 to be rejected.
+
+### Fix
+Updated the regex pattern to `^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$` which correctly matches CIDR notation.
+
+### Testing
+The fix has been tested with various CIDR notations:
+- 192.168.1.0/24 (PASSED)
+- 192.168.3.0/24 (PASSED)
+- 10.0.0.0/8 (PASSED)
+- 172.16.0.0/16 (PASSED)
+
 ## Testing
 
 The fixes have been tested to ensure:
@@ -81,6 +103,7 @@ The fixes have been tested to ensure:
 - Error conditions are handled gracefully
 - User interface provides appropriate feedback
 - JavaScript errors are eliminated
+- CIDR validation works correctly for valid notations
 
 ## Deployment
 
@@ -103,3 +126,4 @@ After deployment, verify the fixes by:
 2. Deleting a route through the web interface and confirming it disappears from `ip route` output
 3. Checking that appropriate success/error messages are displayed
 4. Verifying that no JavaScript errors occur in the browser console
+5. Testing CIDR validation with various valid notations like 192.168.3.0/24

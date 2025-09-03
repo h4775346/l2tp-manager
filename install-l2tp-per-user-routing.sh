@@ -48,7 +48,7 @@ validate_ip() {
 # Function to validate CIDR
 validate_cidr() {
     local cidr=$1
-    if [[ $cidr =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,2}$ ]]; then
+    if [[ $cidr =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
         local ip=$(echo $cidr | cut -d'/' -f1)
         local prefix=$(echo $cidr | cut -d'/' -f2)
         if validate_ip $ip && [[ $prefix -ge 0 && $prefix -le 32 ]]; then
