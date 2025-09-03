@@ -121,6 +121,60 @@ del_route() {
         return 1
     fi
     
+    # Check if we're deleting all routes for this peer
+    if [[ "$dst_cidr" == "all" ]]; then
+        local routes_file="$ROUTES_DIR/$peer_ip$ROUTES_FILE_EXT"
+        
+        if [[ ! -f "$routes_file" ]]; then
+            echo "No routes file found for peer: $peer_ip"
+            return 0
+        fi
+        
+        # Try to delete all routes from the actual routing table
+        local ppp_interface=""
+        for iface in /sys/class/net/ppp*; do
+            if [[ -d "$iface" ]]; then
+                local iface_name=$(basename "$iface")
+                # Get the peer IP for this interface
+                if ip addr show $iface_name | grep -q "peer $peer_ip"; then
+                    ppp_interface=$iface_name
+                    break
+                fi
+            fi
+        done
+        
+        if [[ -n "$ppp_interface" ]]; then
+            # Delete each route from the routing table
+            while IFS= read -r route; do
+                if [[ -n "$route" ]]; then
+                    local dst=$(echo "$route" | awk '{print $1}')
+                    # Construct ip route delete command
+                    local cmd="ip route del $dst dev $ppp_interface"
+                    echo "Executing: $cmd"
+                    if eval $cmd 2>/dev/null; then
+                        echo "Deleted route from routing table: $dst"
+                    else
+                        # Try without dev parameter if it fails
+                        cmd="ip route del $dst"
+                        if eval $cmd 2>/dev/null; then
+                            echo "Deleted route from routing table: $dst"
+                        else
+                            echo "Warning: Failed to delete route from routing table: $dst"
+                        fi
+                    fi
+                fi
+            done < "$routes_file"
+        else
+            echo "Warning: No PPP interface found for peer $peer_ip. Routes may still exist in routing table."
+        fi
+        
+        # Remove the entire routes file
+        sudo rm -f "$routes_file"
+        echo "Removed all routes for peer: $peer_ip"
+        return 0
+    fi
+    
+    # Validate CIDR for single route deletion
     if ! validate_cidr $dst_cidr; then
         echo "Error: Invalid destination CIDR: $dst_cidr"
         return 1

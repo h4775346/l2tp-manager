@@ -12,6 +12,8 @@ This document summarizes the fixes implemented to address the issues with route 
 
 4. **CIDR Validation Issue**: The CIDR validation regex in the CLI tool was incorrect, causing valid CIDR notations like 192.168.3.0/24 to be rejected.
 
+5. **User Deletion Issue**: When a user was deleted, the routes associated with that user were not being removed.
+
 ## Fixes Implemented
 
 ### 1. Enhanced CLI Tool (`l2tp-routectl`)
@@ -23,11 +25,17 @@ Updated the `del_route` function in `/usr/local/sbin/l2tp-routectl` to:
 - Try to delete from the actual routing table using `ip route del` command
 - Remove route from file
 - Remove file if empty
+- **Added support for deleting all routes for a peer**: When "all" is passed as the destination, all routes for that peer are deleted
 
 Fixed the `validate_cidr` function to use the correct regex pattern:
 - Changed from `^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,2}$` 
 - To `^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$`
 - This correctly validates CIDR notation like 192.168.3.0/24
+
+**Duplicate Route Handling**: The CLI tool already had built-in duplicate prevention:
+- When adding a route, it checks if an identical route (same destination, gateway, and device) already exists
+- If an identical route exists, it returns a message "Route already exists" and doesn't add a duplicate
+- This ensures idempotency - adding the same route multiple times has no effect
 
 ### 2. PHP Backend Improvements
 
@@ -35,6 +43,7 @@ Modified `index.php` to improve route handling:
 
 - **Automatic Route Application**: After successfully adding a route, the system now automatically applies it using the `applyRoutes` function
 - **Enhanced Deletion**: The `deletePeerRoute` function now attempts to remove the route from both the configuration file and the actual routing table
+- **User Deletion Enhancement**: When a user is deleted, all routes associated with that user are now automatically removed
 - **Better Error Handling**: Improved error reporting to provide more detailed feedback to the user
 - **Return Code Checking**: Properly check return codes from CLI commands to ensure operations succeeded
 
@@ -54,8 +63,9 @@ Updated the web interface JavaScript to:
 ### Route Addition Flow
 1. User submits route through web interface
 2. PHP backend calls `l2tp-routectl add` to add route to configuration file
-3. If addition succeeds, PHP backend automatically calls `l2tp-routectl apply` to apply route to routing table
-4. JavaScript refreshes route displays and shows success message
+3. CLI tool checks for duplicates and only adds if route doesn't already exist
+4. If addition succeeds, PHP backend automatically calls `l2tp-routectl apply` to apply route to routing table
+5. JavaScript refreshes route displays and shows success message
 
 ### Route Deletion Flow
 1. User requests route deletion through web interface
@@ -65,6 +75,13 @@ Updated the web interface JavaScript to:
    - Attempts to remove route from actual routing table using `ip route del`
    - Provides warnings if PPP interface is not found
 4. JavaScript refreshes route displays and shows success message
+
+### User Deletion Flow
+1. User requests user deletion through web interface
+2. PHP backend:
+   - Calls `l2tp-routectl del --peer <peer_ip> --dst all` to remove all routes for the user
+   - Removes user from chap-secrets file
+3. JavaScript refreshes user display and shows success message
 
 ## Specific JavaScript Fixes
 
@@ -94,6 +111,39 @@ The fix has been tested with various CIDR notations:
 - 10.0.0.0/8 (PASSED)
 - 172.16.0.0/16 (PASSED)
 
+## User Deletion Enhancement
+
+### Issue
+When a user was deleted, the routes associated with that user remained in the configuration files and routing table.
+
+### Fix
+Enhanced the user deletion process to:
+1. Call `l2tp-routectl del --peer <peer_ip> --dst all` to remove all routes for the user
+2. Remove the user from the chap-secrets file as before
+
+### Testing
+The enhancement has been tested to ensure:
+- All routes for a deleted user are removed from configuration files
+- All routes for a deleted user are removed from the routing table
+- The user is properly removed from the chap-secrets file
+- No errors occur during the deletion process
+
+## Duplicate Route Handling
+
+### Implementation
+The system already had built-in duplicate prevention in the CLI tool:
+
+1. **Exact Duplicate Prevention**: When adding a route, the system checks if an identical route (same destination, gateway, and device) already exists
+2. **Idempotency**: Adding the same route multiple times has no effect - the system returns "Route already exists" message
+3. **Route Entry Matching**: The system uses exact string matching (`grep -q "^$route_entry$"`) to detect duplicates
+
+### Testing
+The duplicate handling has been tested to ensure:
+- Exact duplicates are prevented
+- Routes with different gateways for the same destination are allowed
+- Routes with different devices for the same destination are allowed
+- The system properly reports when a route already exists
+
 ## Testing
 
 The fixes have been tested to ensure:
@@ -104,6 +154,8 @@ The fixes have been tested to ensure:
 - User interface provides appropriate feedback
 - JavaScript errors are eliminated
 - CIDR validation works correctly for valid notations
+- User deletion removes associated routes
+- Duplicate routes are properly handled
 
 ## Deployment
 
@@ -127,3 +179,5 @@ After deployment, verify the fixes by:
 3. Checking that appropriate success/error messages are displayed
 4. Verifying that no JavaScript errors occur in the browser console
 5. Testing CIDR validation with various valid notations like 192.168.3.0/24
+6. Deleting a user and confirming all associated routes are removed
+7. Attempting to add duplicate routes and confirming they are properly rejected

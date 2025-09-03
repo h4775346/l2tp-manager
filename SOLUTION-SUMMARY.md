@@ -15,7 +15,17 @@ This document provides a summary of all the components implemented for the per-u
   - Sets up sysctl configuration
   - Configures sudoers permissions
 
-### 2. CLI Tool
+### 2. All-in-One Installation Script
+- **File**: `all-in-one-installer.sh`
+- **Purpose**: Installs L2TP server, web management panel, and per-user routing system in one command
+- **Features**:
+  - Downloads and executes the L2TP server installation script
+  - Downloads and executes the web management interface installation script
+  - Downloads and executes the per-user routing system installation script
+  - Configures all necessary services and permissions
+  - Provides a modular approach by calling separate installation scripts
+
+### 3. CLI Tool
 - **File**: `/usr/local/sbin/l2tp-routectl` (created by installation script)
 - **Purpose**: Command-line interface for managing per-user routes
 - **Commands**:
@@ -24,22 +34,22 @@ This document provides a summary of all the components implemented for the per-u
   - `list` - List routes (all or for specific peer)
   - `apply` - Apply routes (all or for specific peer)
 
-### 3. PPP Hooks
+### 4. PPP Hooks
 - **ip-up hook**: `/etc/ppp/ip-up.d/l2tp-routes` (created by installation script)
 - **ip-down hook**: `/etc/ppp/ip-down.d/l2tp-routes` (created by installation script)
 - **Purpose**: Automatically apply/remove routes when PPP interfaces come up/go down
 
-### 4. Systemd Components
+### 5. Systemd Components
 - **Service**: `/etc/systemd/system/route-l2tp-apply-all.service` (created by installation script)
 - **Timer**: `/etc/systemd/system/route-l2tp-apply-all.timer` (created by installation script)
 - **Purpose**: Ensure routes are applied at system startup and periodically
 
-### 5. Configuration Files
+### 6. Configuration Files
 - **Sysctl config**: `/etc/sysctl.d/99-l2tp-routing.conf` (created by installation script)
 - **Sudoers config**: `/etc/sudoers.d/l2tp-routectl` (created by installation script)
 - **Routes directory**: `/etc/l2tp-manager/routes.d/` (created by installation script)
 
-### 6. PHP Integration
+### 7. PHP Integration
 - **File**: `index.php` (modified)
 - **Features Added**:
   - New "Manage Routes" section in the web interface
@@ -47,14 +57,14 @@ This document provides a summary of all the components implemented for the per-u
   - Forms for adding/deleting routes
   - Display of current routes
 
-### 7. Documentation
+### 8. Documentation
 - **File**: `ROUTING-README.md`
 - **Purpose**: Detailed documentation of the routing system
 
 - **File**: `readme.md` (updated)
 - **Purpose**: Updated main README with routing system information
 
-### 8. Examples and Tests
+### 9. Examples and Tests
 - **File**: `example-usage.sh`
 - **Purpose**: Example commands showing how to use the routing system
 
@@ -88,9 +98,36 @@ The web interface has been extended with:
 - Routes are re-applied automatically on system boot via systemd service
 - Routes are re-applied automatically when PPP user reconnects via ip-up hook
 
+## Recent Enhancements
+
+### User Deletion Enhancement
+- When a user is deleted, all routes associated with that user are now automatically removed
+- This ensures no orphaned routes remain in the system after user deletion
+
+### Route Addition Issue
+- Fixed issue where routes were added to configuration file but not immediately applied to routing table
+- Added automatic route application after successful addition through web interface
+
+### Route Deletion Issue
+- Fixed issue where routes were removed from configuration file but persisted in routing table
+- Enhanced `del_route` function to remove routes from both configuration file and actual routing table
+
+### JavaScript Error Handling
+- Fixed JavaScript errors related to element existence checks
+- Added proper error handling for all DOM interactions
+
+### CIDR Validation Fix
+- Fixed CIDR validation regex to properly validate CIDR notation like 192.168.3.0/24
+
+### Duplicate Route Handling
+- The system prevents exact duplicate routes (same destination, gateway, and device) from being added
+- Built-in idempotency ensures adding the same route multiple times has no effect
+- CLI tool returns "Route already exists" message when duplicates are detected
+
 ## Deliverables Completed
 
 ✅ Full bash script `install-l2tp-per-user-routing.sh` that installs everything
+✅ All-in-one installation script for complete system setup
 ✅ Example usage commands for admin
 ✅ PHP code (HTML + backend) to manage per-user routes inside the panel
 
@@ -112,6 +149,15 @@ The web interface has been extended with:
 - Fixed issue where routes were removed from configuration file but persisted in routing table
 - Enhanced `del_route` function to remove routes from both configuration file and actual routing table
 - Added proper error handling and warnings when PPP interface is not found
+
+### User Deletion Enhancement
+- When a user is deleted, all routes associated with that user are now automatically removed
+- This ensures no orphaned routes remain in the system after user deletion
+
+### Duplicate Route Handling
+- The system prevents exact duplicate routes from being added
+- Idempotency is ensured through built-in duplicate detection
+- Different routes with same destination but different gateways/devices are allowed
 
 ## Troubleshooting
 

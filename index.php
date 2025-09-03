@@ -223,6 +223,12 @@ function applyPeerRoutes($peerIp) {
     return executeRouteCommand($command);
 }
 
+// Function to delete all routes for a peer
+function deleteAllPeerRoutes($peerIp) {
+    $command = "del --peer " . escapeshellarg($peerIp) . " --dst all";
+    return executeRouteCommand($command);
+}
+
 $users = readUsers($file);
 
 // Add routes information to each user
@@ -268,6 +274,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     } elseif (isset($_POST['delete'])) {
         $index = (int)$_POST['index'];
+        
+        // Get the IP of the user being deleted
+        $userIp = $users[$index]['ip'];
+        
+        // Delete all routes associated with this user
+        deleteAllPeerRoutes($userIp);
+        
+        // Delete the user
         array_splice($users, $index, 1);
         writeUsers($file, $users);
         exit();
