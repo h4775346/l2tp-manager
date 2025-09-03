@@ -18,6 +18,12 @@ curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-l2t
 ```
 curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-install.sh | sudo bash
 ```
+
+## To Install Per-User Routing System (Optional)
+```
+sudo ./install-l2tp-per-user-routing.sh
+```
+
 ## Then You are ready to go
 
 ```
@@ -32,3 +38,7 @@ https://______sas_ip______:8099/l2tp-manager/
 🗝️ Default username admin
 🗝️ Default password change@me
 
+## Per-User Routing System
+
+This system allows you to configure custom routes that are applied when L2TP users connect. 
+After installation, you can manage routes through the web interface by clicking "Manage Routes".

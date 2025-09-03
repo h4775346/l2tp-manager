@@ -92,6 +92,52 @@ function getNextIp($users) {
     return long2ip($nextIpLong);
 }
 
+// Function to execute l2tp-routectl command
+function executeRouteCommand($command) {
+    $fullCommand = "sudo /usr/local/sbin/l2tp-routectl " . $command . " 2>&1";
+    exec($fullCommand, $output, $returnCode);
+    return [
+        'output' => implode("\n", $output),
+        'returnCode' => $returnCode
+    ];
+}
+
+// Function to get routes for a peer
+function getPeerRoutes($peerIp = null) {
+    $command = "list";
+    if ($peerIp) {
+        $command .= " --peer " . escapeshellarg($peerIp);
+    }
+    
+    $result = executeRouteCommand($command);
+    if ($result['returnCode'] === 0) {
+        return $result['output'];
+    }
+    return "";
+}
+
+// Function to add a route
+function addPeerRoute($peerIp, $destination, $gateway = null) {
+    $command = "add --peer " . escapeshellarg($peerIp) . " --dst " . escapeshellarg($destination);
+    if ($gateway) {
+        $command .= " --gw " . escapeshellarg($gateway);
+    }
+    
+    return executeRouteCommand($command);
+}
+
+// Function to delete a route
+function deletePeerRoute($peerIp, $destination) {
+    $command = "del --peer " . escapeshellarg($peerIp) . " --dst " . escapeshellarg($destination);
+    return executeRouteCommand($command);
+}
+
+// Function to apply routes for a peer
+function applyPeerRoutes($peerIp) {
+    $command = "apply --peer " . escapeshellarg($peerIp);
+    return executeRouteCommand($command);
+}
+
 $users = readUsers($file);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -192,10 +238,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         echo json_encode(['success' => true]);
         exit();
+    } elseif (isset($_POST['addRoute'])) {
+        $peerIp = $_POST['peerIp'];
+        $destination = $_POST['destination'];
+        $gateway = !empty($_POST['gateway']) ? $_POST['gateway'] : null;
+
+        $result = addPeerRoute($peerIp, $destination, $gateway);
+        echo json_encode($result);
+        exit();
+    } elseif (isset($_POST['deleteRoute'])) {
+        $peerIp = $_POST['peerIp'];
+        $destination = $_POST['destination'];
+
+        $result = deletePeerRoute($peerIp, $destination);
+        echo json_encode($result);
+        exit();
+    } elseif (isset($_POST['applyRoutes'])) {
+        $peerIp = $_POST['peerIp'];
+        $result = applyPeerRoutes($peerIp);
+        echo json_encode($result);
+        exit();
+    } elseif (isset($_POST['listRoutes'])) {
+        $allRoutes = getPeerRoutes();
+        echo $allRoutes;
+        exit();
     }
 }
-?>
 
+// Get routes for all users
+$allRoutes = getPeerRoutes();
+?>
 <!DOCTYPE html>
 <html>
 <head>
@@ -289,99 +361,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="d-flex justify-content-center flex-wrap">
         <button class="btn btn-success me-2 mb-2" data-bs-toggle="modal" data-bs-target="#userModal" onclick="resetForm()">Add User</button>
         <button class="btn btn-secondary mb-2" data-bs-toggle="modal" data-bs-target="#multipleUsersModal">Add Multiple Users</button>
+        <button class="btn btn-info mb-2 ms-2" data-bs-toggle="modal" data-bs-target="#routesModal">Manage Routes</button>
     </div>
-</div>
 
-<!-- User Modal -->
-<div class="modal fade" id="userModal" tabindex="-1" aria-labelledby="userModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+<!-- Routes Modal -->
+<div class="modal fade" id="routesModal" tabindex="-1" aria-labelledby="routesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="userModalLabel">Add User</h5>
+                <h5 class="modal-title" id="routesModalLabel">User Routes Management</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form id="addUserForm">
-                    <div class="mb-3">
-                        <label for="client" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="client" name="client" required placeholder="Enter username">
-                        <small class="form-text text-muted">Example: user123</small>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>Add New Route</h5>
+                        <form id="addRouteForm">
+                            <div class="mb-3">
+                                <label for="routePeerIp" class="form-label">Peer IP</label>
+                                <select class="form-control" id="routePeerIp" name="peerIp" required>
+                                    <option value="">Select a user</option>
+                                    <?php foreach ($users as $user): ?>
+                                        <option value="<?php echo htmlspecialchars($user['ip']); ?>">
+                                            <?php echo htmlspecialchars($user['client'] . ' (' . $user['ip'] . ')'); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="routeDestination" class="form-label">Destination (CIDR)</label>
+                                <input type="text" class="form-control" id="routeDestination" name="destination" required placeholder="e.g., 192.168.1.0/24">
+                            </div>
+                            <div class="mb-3">
+                                <label for="routeGateway" class="form-label">Gateway (optional, defaults to Peer IP)</label>
+                                <input type="text" class="form-control" id="routeGateway" name="gateway" placeholder="e.g., 10.255.10.1">
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Add Route</button>
+                        </form>
                     </div>
-                    <div class="mb-3" style="display: none;">
-                        <label for="server" class="form-label">Server</label>
-                        <input type="text" class="form-control" id="server" name="server" value="*" required>
+                    <div class="col-md-6">
+                        <h5>Current Routes</h5>
+                        <div class="routes-list-container" style="max-height: 300px; overflow-y: auto;">
+                            <pre id="routesList"><?php echo htmlspecialchars($allRoutes); ?></pre>
+                        </div>
+                        <div class="mt-3">
+                            <button class="btn btn-secondary" onclick="refreshRoutes()">Refresh Routes</button>
+                            <button class="btn btn-warning" onclick="applyAllRoutes()">Apply All Routes</button>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="secret" class="form-label">Password</label>
-                        <input type="text" class="form-control" id="secret" name="secret" required placeholder="Enter password">
-                        <small class="form-text text-muted">Example: P@ssw0rd123</small>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <div class="alert alert-info">
+                            <h6>Route Management Commands:</h6>
+                            <ul>
+                                <li>Add routes for specific users - they will be applied automatically when the user connects</li>
+                                <li>Routes are stored persistently and will be reapplied on system reboot</li>
+                                <li>Use "Apply All Routes" to manually apply all configured routes</li>
+                            </ul>
+                        </div>
                     </div>
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="manualIpCheck" onclick="toggleManualIp('single')">
-                        <label class="form-check-label" for="manualIpCheck">Select IP Manually</label>
-                    </div>
-                    <div class="mb-3" id="ipInputSingle" style="display: none;">
-                        <label for="ip" class="form-label">IP Address</label>
-                        <input type="text" class="form-control" id="ip" name="ip" placeholder="Enter IP address">
-                        <small class="form-text text-muted">Example: 10.255.10.15</small>
-                    </div>
-                    <button type="submit" class="btn btn-success w-100">Add User</button>
-                </form>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Multiple Users Modal -->
-<div class="modal fade" id="multipleUsersModal" tabindex="-1" aria-labelledby="multipleUsersModalLabel" aria-hidden="true">
+<!-- Confirm Delete Route Modal -->
+<div class="modal fade" id="confirmDeleteRouteModal" tabindex="-1" aria-labelledby="confirmDeleteRouteModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="multipleUsersModalLabel">Add Multiple Users</h5>
+                <h5 class="modal-title" id="confirmDeleteRouteModalLabel">Confirm Delete Route</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form id="addMultipleUsersForm">
-                    <div class="mb-3">
-                        <label for="numUsers" class="form-label">Number of Users</label>
-                        <input type="number" class="form-control" id="numUsers" name="numUsers" required placeholder="Enter number of users">
-                    </div>
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="manualIpCheckMultiple" onclick="toggleManualIp('multiple')">
-                        <label class="form-check-label" for="manualIpCheckMultiple">Select IP Manually</label>
-                    </div>
-                    <div class="mb-3" id="ipInputMultiple" style="display: none;">
-                        <label for="ipRangeFrom" class="form-label">IP Range From</label>
-                        <input type="text" class="form-control" id="ipRangeFrom" name="ipRangeFrom" placeholder="Enter starting IP address">
-                        <small class="form-text text-muted">Example: 10.255.10.15</small>
-                        <label for="ipRangeTo" class="form-label mt-2">IP Range To</label>
-                        <input type="text" class="form-control" id="ipRangeTo" name="ipRangeTo" placeholder="Enter ending IP address">
-                        <small class="form-text text-muted">Example: 10.255.10.25</small>
-                    </div>
-                    <button type="submit" class="btn btn-success w-100">Add Users</button>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Confirm Delete Modal -->
-<div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-labelledby="confirmDeleteModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="confirmDeleteModalLabel">Confirm Delete</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <p>Are you sure you want to delete this user?</p>
+                <p>Are you sure you want to delete this route?</p>
+                <p><strong>Destination:</strong> <span id="deleteRouteDestination"></span></p>
+                <p><strong>Peer IP:</strong> <span id="deleteRoutePeer"></span></p>
             </div>
             <div class="modal-footer">
-                <form id="deleteUserForm" method="POST" action="">
-                    <input type="hidden" name="index" id="deleteIndex">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-danger">Delete</button>
-                </form>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteRouteButton">Delete</button>
             </div>
         </div>
     </div>
@@ -428,7 +489,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
 </div>
-
 
 <script>
     document.getElementById('addUserForm').addEventListener('submit', function(event) {
@@ -588,6 +648,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     document.getElementById('errorModal').style.display = 'block';
                 }
             });
+    });
+
+    // Handle route management
+    document.getElementById('addRouteForm').addEventListener('submit', function(event) {
+        event.preventDefault();
+        const peerIp = document.getElementById('routePeerIp').value;
+        const destination = document.getElementById('routeDestination').value;
+        const gateway = document.getElementById('routeGateway').value;
+
+        if (!peerIp || !destination) {
+            document.getElementById('errorMessage').textContent = 'Peer IP and Destination are required';
+            document.getElementById('errorModal').classList.add('show');
+            document.getElementById('errorModal').style.display = 'block';
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('addRoute', '1');
+        formData.append('peerIp', peerIp);
+        formData.append('destination', destination);
+        if (gateway) formData.append('gateway', gateway);
+
+        fetch('', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json())
+            .then(data => {
+                if (data.returnCode === 0) {
+                    // Success
+                    document.getElementById('addRouteForm').reset();
+                    refreshRoutes();
+                    // Show success message
+                    document.getElementById('errorMessage').textContent = 'Route added successfully';
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
+                    document.getElementById('errorModalClose').onclick = function() {
+                        document.getElementById('errorModal').classList.remove('show');
+                        document.getElementById('errorModal').style.display = 'none';
+                    };
+                } else {
+                    // Error
+                    document.getElementById('errorMessage').textContent = 'Error adding route: ' + data.output;
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
+                }
+            });
+    });
+
+    function refreshRoutes() {
+        fetch('', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'listRoutes=1'
+        }).then(response => response.text())
+            .then(data => {
+                document.getElementById('routesList').textContent = data;
+            });
+    }
+
+    function applyAllRoutes() {
+        const formData = new FormData();
+        formData.append('applyRoutes', '1');
+        formData.append('peerIp', 'all');
+
+        fetch('', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json())
+            .then(data => {
+                if (data.returnCode === 0) {
+                    document.getElementById('errorMessage').textContent = 'All routes applied successfully';
+                } else {
+                    document.getElementById('errorMessage').textContent = 'Error applying routes: ' + data.output;
+                }
+                document.getElementById('errorModal').classList.add('show');
+                document.getElementById('errorModal').style.display = 'block';
+            });
+    }
+
+    // Initialize the routes modal with current routes
+    document.getElementById('routesModal').addEventListener('shown.bs.modal', function () {
+        refreshRoutes();
     });
 </script>
 
