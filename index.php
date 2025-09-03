@@ -116,12 +116,55 @@ function getPeerRoutes($peerIp = null) {
     return "";
 }
 
+// Function to get routes for a peer and return them as an array
+function getPeerRoutesArray($peerIp) {
+    $command = "list --peer " . escapeshellarg($peerIp);
+    $result = executeRouteCommand($command);
+    
+    $routes = [];
+    if ($result['returnCode'] === 0) {
+        $output = $result['output'];
+        // Parse the output to extract routes
+        $lines = explode("\n", $output);
+        foreach ($lines as $line) {
+            // Skip header lines and empty lines
+            if (empty(trim($line)) || strpos($line, 'Routes for peer') !== false || strpos($line, 'Peer:') !== false) {
+                continue;
+            }
+            // Add valid route lines (lines containing network routes)
+            if (preg_match('/^\d+\.\d+\.\d+\.\d+\/\d+/', $line)) {
+                $routes[] = trim($line);
+            }
+        }
+    }
+    return $routes;
+}
+
+// Function to get a formatted string of routes for display
+function getPeerRoutesFormatted($peerIp) {
+    $routes = getPeerRoutesArray($peerIp);
+    if (empty($routes)) {
+        return "No routes";
+    }
+    
+    // Limit the display to first 3 routes with a "+X more" if there are more
+    $displayRoutes = array_slice($routes, 0, 3);
+    $formatted = implode("\n", $displayRoutes);
+    
+    if (count($routes) > 3) {
+        $formatted .= "\n... and " . (count($routes) - 3) . " more";
+    }
+    
+    return $formatted;
+}
+
 // Function to add a route
 function addPeerRoute($peerIp, $destination, $gateway = null) {
     $command = "add --peer " . escapeshellarg($peerIp) . " --dst " . escapeshellarg($destination);
     if ($gateway) {
         $command .= " --gw " . escapeshellarg($gateway);
     }
+    
     
     return executeRouteCommand($command);
 }
@@ -139,6 +182,12 @@ function applyPeerRoutes($peerIp) {
 }
 
 $users = readUsers($file);
+
+// Add routes information to each user
+foreach ($users as &$user) {
+    $user['routes'] = getPeerRoutesFormatted($user['ip']);
+}
+unset($user); // Break the reference
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Handle logout
@@ -262,6 +311,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $allRoutes = getPeerRoutes();
         echo $allRoutes;
         exit();
+    } elseif (isset($_POST['getUserRoutes'])) {
+        $peerIp = $_POST['peerIp'];
+        $routes = getPeerRoutesFormatted($peerIp);
+        echo json_encode(['routes' => $routes]);
+        exit();
+    } elseif (isset($_POST['getAllUsersRoutes'])) {
+        $allRoutes = [];
+        foreach ($users as $user) {
+            $allRoutes[$user['ip']] = getPeerRoutesFormatted($user['ip']);
+        }
+        echo json_encode($allRoutes);
+        exit();
     }
 }
 
@@ -305,6 +366,21 @@ $allRoutes = getPeerRoutes();
         .table-responsive {
             overflow-x: auto;
         }
+        
+        .routes-cell {
+            text-align: left;
+            white-space: pre-line;
+            max-width: 200px;
+            word-wrap: break-word;
+            font-size: 0.85em;
+            position: relative;
+        }
+        
+        .routes-content {
+            max-height: 80px;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
     </style>
 </head>
 <body>
@@ -340,6 +416,7 @@ $allRoutes = getPeerRoutes();
                 <th>Server</th>
                 <th>Password</th>
                 <th>IP Address</th>
+                <th>Routes <button class="btn btn-sm btn-outline-light ms-2" onclick="refreshAllRoutes()" title="Refresh all routes">↻</button></th>
                 <th>Actions</th>
             </tr>
             </thead>
@@ -350,6 +427,10 @@ $allRoutes = getPeerRoutes();
                     <td><?php echo htmlspecialchars($user['server']); ?></td>
                     <td><?php echo htmlspecialchars($user['secret']); ?></td>
                     <td><?php echo htmlspecialchars($user['ip']); ?></td>
+                    <td class="routes-cell">
+                        <div class="routes-content"><?php echo htmlspecialchars($user['routes']); ?></div>
+                        <button class="btn btn-sm btn-outline-primary mt-1" onclick="refreshUserRoutes('<?php echo $user['ip']; ?>', this.parentElement)" title="Refresh routes">↻</button>
+                    </td>
                     <td>
                         <button class="btn btn-danger btn-sm" onclick="confirmDelete(<?php echo $index; ?>)" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
                     </td>
@@ -524,6 +605,7 @@ $allRoutes = getPeerRoutes();
                   <td>${server}</td>
                   <td>${secret}</td>
                   <td>${data.ip}</td>  <!-- Use the IP returned from the server -->
+                  <td>No routes</td>
                   <td>
                       <button class="btn btn-danger btn-sm" onclick="confirmDelete(${newIndex})" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
                   </td>
@@ -729,10 +811,77 @@ $allRoutes = getPeerRoutes();
             });
     }
 
+    function refreshAllRoutes() {
+        location.reload();
+    }
+
     // Initialize the routes modal with current routes
     document.getElementById('routesModal').addEventListener('shown.bs.modal', function () {
         refreshRoutes();
     });
+    
+    // Function to refresh all routes in the table
+    function refreshAllRoutes() {
+        // Show a loading indicator
+        const routeCells = document.querySelectorAll('.routes-cell');
+        routeCells.forEach(cell => {
+            cell.textContent = 'Loading...';
+        });
+        
+        // Get updated routes for all users
+        const formData = new FormData();
+        formData.append('getAllUsersRoutes', '1');
+        
+        fetch('', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json())
+            .then(data => {
+                // Update each row with the new route information
+                const rows = document.querySelectorAll('#userTable tr[id^="user-"]');
+                rows.forEach(row => {
+                    const rowIndex = row.id.split('-')[1];
+                    const userIp = row.cells[3].textContent; // IP is in the 4th column (0-indexed)
+                    if (data[userIp]) {
+                        row.cells[4].textContent = data[userIp]; // Routes are in the 5th column
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('Error refreshing routes:', error);
+                // Restore original content on error
+                routeCells.forEach(cell => {
+                    cell.textContent = 'Error loading routes';
+                });
+            });
+    }
+    
+    // Function to refresh routes for a specific user
+    function refreshUserRoutes(peerIp, cellElement) {
+        // Store the button element
+        const buttonElement = cellElement.querySelector('button');
+        const contentElement = cellElement.querySelector('.routes-content');
+        
+        // Show loading indicator
+        contentElement.textContent = 'Loading...';
+        
+        const formData = new FormData();
+        formData.append('getUserRoutes', '1');
+        formData.append('peerIp', peerIp);
+        
+        fetch('', {
+            method: 'POST',
+            body: formData
+        }).then(response => response.json())
+            .then(data => {
+                // Update the routes text
+                contentElement.textContent = data.routes;
+            })
+            .catch(error => {
+                console.error('Error refreshing routes:', error);
+                contentElement.textContent = 'Error loading routes';
+            });
+    }
 </script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
