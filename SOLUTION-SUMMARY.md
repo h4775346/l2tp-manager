@@ -100,3 +100,13 @@ The web interface has been extended with:
 - Multiple PPP peers are handled simultaneously
 - Code is production-ready with clear comments for future administrators
 - All security considerations have been addressed (sudoers configuration, input validation)
+- Fixed sysctl configuration issue with rp_filter for PPP interfaces
+
+## Troubleshooting
+
+### Sysctl Configuration
+The original implementation had an issue with the sysctl configuration using wildcards for PPP interfaces. This has been fixed by:
+1. Setting `net.ipv4.conf.all.rp_filter = 2` in the sysctl config
+2. Dynamically setting rp_filter for specific PPP interfaces in the ip-up hook
+
+This approach is more reliable and works across different kernel versions.

@@ -41,6 +41,19 @@ All requirements from the original AI.md have been implemented:
 ✅ Handles multiple PPP peers simultaneously
 ✅ Production-ready and clean code with clear comments
 
+## Fixes Applied
+
+### Sysctl Configuration Issue
+The original implementation had an issue with the sysctl configuration using wildcards for PPP interfaces:
+```
+sysctl: cannot stat /proc/sys/net/ipv4/conf/ppp*/rp_filter: No such file or directory
+```
+
+This has been fixed by:
+1. Setting `net.ipv4.conf.all.rp_filter = 2` in the sysctl config as a baseline
+2. Dynamically setting rp_filter for specific PPP interfaces in the ip-up hook
+3. This approach is more reliable and works across different kernel versions
+
 ## Usage
 
 To use the implemented system:

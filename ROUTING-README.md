@@ -102,3 +102,20 @@ sudo /usr/local/sbin/l2tp-routectl del --peer 10.255.10.11 --dst 192.168.1.0/24
 - The web interface uses sudo to execute the CLI tool
 - Permissions are restricted through the sudoers configuration
 - Only the www-data user can execute the routing commands without a password
+
+## Troubleshooting
+
+### rp_filter Issues
+The system sets rp_filter to loose mode (value 2) for PPP interfaces when they come up. This is necessary for proper routing functionality in some network configurations.
+
+### Route Application Failures
+If routes fail to apply, check:
+1. That the PPP interface is up
+2. That the destination network is valid
+3. That there are no conflicting routes already in the routing table
+
+### Debugging
+You can run the CLI tool with verbose output to see what commands are being executed:
+```bash
+sudo /usr/local/sbin/l2tp-routectl apply --peer 10.255.10.11
+```

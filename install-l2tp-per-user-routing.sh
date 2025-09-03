@@ -1,23 +1,3 @@
-#!/bin/bash
-
-# L2TP Per-User Routing System Installation Script
-# This script installs all components required for per-user routing
-
-set -e
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-echo -e "${GREEN}Installing L2TP Per-User Routing System...${NC}"
-
-# Create required directories
-echo -e "${YELLOW}Creating directories...${NC}"
-sudo mkdir -p /etc/l2tp-manager/routes.d
-sudo mkdir -p /usr/local/sbin
-
 # Create the l2tp-routectl CLI tool
 echo -e "${YELLOW}Creating l2tp-routectl CLI tool...${NC}"
 sudo tee /usr/local/sbin/l2tp-routectl > /dev/null << 'EOF'
@@ -25,8 +5,6 @@ sudo tee /usr/local/sbin/l2tp-routectl > /dev/null << 'EOF'
 
 # l2tp-routectl - CLI tool for managing per-user routes
 # Usage: l2tp-routectl [command] [options]
-
-set -e
 
 ROUTES_DIR="/etc/l2tp-manager/routes.d"
 ROUTES_FILE_EXT=".routes"
@@ -90,17 +68,17 @@ add_route() {
     # Validate inputs
     if ! validate_ip $peer_ip; then
         echo "Error: Invalid peer IP address: $peer_ip"
-        exit 1
+        return 1
     fi
     
     if ! validate_cidr $dst_cidr; then
         echo "Error: Invalid destination CIDR: $dst_cidr"
-        exit 1
+        return 1
     fi
     
     if [[ -n "$gateway" ]] && ! validate_ip $gateway; then
         echo "Error: Invalid gateway IP address: $gateway"
-        exit 1
+        return 1
     fi
     
     # Set default gateway to peer IP if not provided
@@ -129,6 +107,7 @@ add_route() {
     # Add route to file
     echo "$route_entry" | sudo tee -a "$routes_file" > /dev/null
     echo "Added route: $route_entry"
+    return 0
 }
 
 # Function to delete a route
@@ -139,18 +118,26 @@ del_route() {
     # Validate inputs
     if ! validate_ip $peer_ip; then
         echo "Error: Invalid peer IP address: $peer_ip"
-        exit 1
+        return 1
     fi
     
     if ! validate_cidr $dst_cidr; then
         echo "Error: Invalid destination CIDR: $dst_cidr"
-        exit 1
+        return 1
     fi
     
     local routes_file="$ROUTES_DIR/$peer_ip$ROUTES_FILE_EXT"
     
     if [[ ! -f "$routes_file" ]]; then
         echo "No routes file found for peer: $peer_ip"
+        return 0
+    fi
+    
+    # Count how many routes match before deletion
+    local count=$(grep -c "^$dst_cidr" "$routes_file" 2>/dev/null || echo "0")
+    
+    if [[ $count -eq 0 ]]; then
+        echo "No route found with destination: $dst_cidr"
         return 0
     fi
     
@@ -163,6 +150,7 @@ del_route() {
         sudo rm -f "$routes_file"
         echo "Removed empty routes file for peer: $peer_ip"
     fi
+    return 0
 }
 
 # Function to list routes
@@ -173,7 +161,7 @@ list_routes() {
         # List routes for specific peer
         if ! validate_ip $peer_ip; then
             echo "Error: Invalid peer IP address: $peer_ip"
-            exit 1
+            return 1
         fi
         
         local routes_file="$ROUTES_DIR/$peer_ip$ROUTES_FILE_EXT"
@@ -200,6 +188,7 @@ list_routes() {
             echo "No routes found"
         fi
     fi
+    return 0
 }
 
 # Function to apply routes for a peer
@@ -209,7 +198,7 @@ apply_routes() {
     # Validate input
     if ! validate_ip $peer_ip; then
         echo "Error: Invalid peer IP address: $peer_ip"
-        exit 1
+        return 1
     fi
     
     local routes_file="$ROUTES_DIR/$peer_ip$ROUTES_FILE_EXT"
@@ -237,6 +226,9 @@ apply_routes() {
         return 0
     fi
     
+    local success_count=0
+    local fail_count=0
+    
     # Apply each route
     while IFS= read -r route; do
         if [[ -n "$route" ]]; then
@@ -246,7 +238,7 @@ apply_routes() {
             local dev=$(echo "$route" | grep -o 'dev [a-zA-Z0-9]*' | awk '{print $2}')
             
             # Construct ip route command
-            local cmd="sudo ip route add $dst"
+            local cmd="ip route add $dst"
             if [[ -n "$via" ]]; then
                 cmd="$cmd via $via"
             fi
@@ -258,17 +250,37 @@ apply_routes() {
             
             # Execute command
             echo "Executing: $cmd"
-            if eval $cmd; then
+            if eval $cmd 2>/dev/null; then
                 echo "Applied route: $route"
+                ((success_count++))
             else
-                echo "Failed to apply route: $route"
+                # Try without dev parameter if it fails
+                if [[ -z "$dev" ]]; then
+                    cmd="ip route add $dst via $via"
+                    if eval $cmd 2>/dev/null; then
+                        echo "Applied route: $route"
+                        ((success_count++))
+                    else
+                        echo "Failed to apply route: $route"
+                        ((fail_count++))
+                    fi
+                else
+                    echo "Failed to apply route: $route"
+                    ((fail_count++))
+                fi
             fi
         fi
     done < "$routes_file"
+    
+    echo "Route application complete. Success: $success_count, Failed: $fail_count"
+    return 0
 }
 
 # Function to apply all routes
 apply_all_routes() {
+    local total_success=0
+    local total_fail=0
+    
     if [[ -d "$ROUTES_DIR" ]] && [[ -n "$(ls -A $ROUTES_DIR)" ]]; then
         for file in $ROUTES_DIR/*$ROUTES_FILE_EXT; do
             if [[ -f "$file" ]]; then
@@ -276,11 +288,13 @@ apply_all_routes() {
                 local peer=$(echo "$filename" | sed "s|$ROUTES_FILE_EXT$||")
                 echo "Applying routes for peer: $peer"
                 apply_routes $peer
+                echo ""
             fi
         done
     else
         echo "No routes to apply"
     fi
+    return 0
 }
 
 # Parse command line arguments
@@ -408,114 +422,3 @@ EOF
 
 # Make the CLI tool executable
 sudo chmod +x /usr/local/sbin/l2tp-routectl
-
-# Create ip-up hook
-echo -e "${YELLOW}Creating ip-up hook...${NC}"
-sudo mkdir -p /etc/ppp/ip-up.d
-sudo tee /etc/ppp/ip-up.d/l2tp-routes > /dev/null << 'EOF'
-#!/bin/bash
-
-# This script is called when a PPP interface comes up
-# It applies any custom routes for the connecting user
-
-# Get the peer IP from environment variables
-PEER_IP=$5
-
-if [[ -n "$PEER_IP" ]]; then
-    # Apply routes for this peer
-    /usr/local/sbin/l2tp-routectl apply --peer $PEER_IP
-fi
-EOF
-
-# Make the ip-up hook executable
-sudo chmod +x /etc/ppp/ip-up.d/l2tp-routes
-
-# Create ip-down hook
-echo -e "${YELLOW}Creating ip-down hook...${NC}"
-sudo mkdir -p /etc/ppp/ip-down.d
-sudo tee /etc/ppp/ip-down.d/l2tp-routes > /dev/null << 'EOF'
-#!/bin/bash
-
-# This script is called when a PPP interface goes down
-# It removes any custom routes for the disconnecting user
-
-# Get the peer IP from environment variables
-PEER_IP=$5
-
-if [[ -n "$PEER_IP" ]]; then
-    # Remove all routes via this peer
-    # Note: This is a simplified approach - in production, you might want to be more specific
-    ip route show | grep "via $PEER_IP" | while read route; do
-        route_dst=$(echo $route | awk '{print $1}')
-        ip route del $route_dst via $PEER_IP 2>/dev/null || true
-    done
-fi
-EOF
-
-# Make the ip-down hook executable
-sudo chmod +x /etc/ppp/ip-down.d/l2tp-routes
-
-# Create systemd service
-echo -e "${YELLOW}Creating systemd service...${NC}"
-sudo tee /etc/systemd/system/route-l2tp-apply-all.service > /dev/null << 'EOF'
-[Unit]
-Description=Apply all L2TP per-user routes
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/l2tp-routectl apply
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Create systemd timer to apply routes periodically (optional)
-sudo tee /etc/systemd/system/route-l2tp-apply-all.timer > /dev/null << 'EOF'
-[Unit]
-Description=Periodically apply all L2TP per-user routes
-Requires=route-l2tp-apply-all.service
-
-[Timer]
-OnBootSec=15
-OnUnitActiveSec=60
-
-[Install]
-WantedBy=timers.target
-EOF
-
-# Create sysctl configuration
-echo -e "${YELLOW}Creating sysctl configuration...${NC}"
-sudo tee /etc/sysctl.d/99-l2tp-routing.conf > /dev/null << 'EOF'
-# Enable IP forwarding
-net.ipv4.ip_forward = 1
-
-# Set rp_filter to loose mode for PPP interfaces
-net.ipv4.conf.ppp*.rp_filter = 2
-EOF
-
-# Apply sysctl settings
-sudo sysctl -p /etc/sysctl.d/99-l2tp-routing.conf
-
-# Create sudoers configuration for www-data
-echo -e "${YELLOW}Creating sudoers configuration...${NC}"
-sudo tee /etc/sudoers.d/l2tp-routectl > /dev/null << 'EOF'
-# Allow www-data to run l2tp-routectl without password
-www-data ALL=(ALL) NOPASSWD: /usr/local/sbin/l2tp-routectl
-EOF
-
-# Set proper permissions for sudoers file
-sudo chmod 440 /etc/sudoers.d/l2tp-routectl
-
-# Enable and start systemd services
-echo -e "${YELLOW}Enabling systemd services...${NC}"
-sudo systemctl daemon-reload
-sudo systemctl enable route-l2tp-apply-all.service
-sudo systemctl enable route-l2tp-apply-all.timer
-
-echo -e "${GREEN}L2TP Per-User Routing System installed successfully!${NC}"
-echo -e "${YELLOW}To start using it, you can:${NC}"
-echo -e "  - Add a route: sudo /usr/local/sbin/l2tp-routectl add --peer 10.255.10.11 --dst 10.255.10.0/24"
-echo -e "  - List routes: sudo /usr/local/sbin/l2tp-routectl list"
-echo -e "  - Apply routes: sudo /usr/local/sbin/l2tp-routectl apply --peer 10.255.10.11"
