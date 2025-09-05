@@ -250,6 +250,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $client = $_POST['client'];
         $ip = $_POST['ip'] ?? getNextIp($users);
 
+        // Validate input
+        if (empty($client)) {
+            echo json_encode(['error' => 'Username is required']);
+            exit();
+        }
+        
+        if (empty($_POST['secret'])) {
+            echo json_encode(['error' => 'Password is required']);
+            exit();
+        }
+
         // Check for duplicate username and IP
         foreach ($users as $user) {
             if ($user['client'] === $client) {
@@ -287,8 +298,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     } elseif (isset($_POST['addMultiple'])) {
         $numUsers = (int)$_POST['numUsers'];
+        
+        // Validate input
+        if ($numUsers <= 0) {
+            echo json_encode(['error' => 'Number of users must be greater than 0']);
+            exit();
+        }
+        
+        if ($numUsers > 100) {
+            echo json_encode(['error' => 'Number of users cannot exceed 100']);
+            exit();
+        }
+
         $ipRangeFrom = !empty($_POST['ipRangeFrom']) ? ip2long($_POST['ipRangeFrom']) : ip2long(getNextIp($users));
         $ipRangeTo = !empty($_POST['ipRangeTo']) ? ip2long($_POST['ipRangeTo']) : $ipRangeFrom + $numUsers - 1;
+
+        // Validate IP range
+        if (!empty($_POST['ipRangeFrom']) && !empty($_POST['ipRangeTo'])) {
+            if ($ipRangeFrom === false || $ipRangeTo === false) {
+                echo json_encode(['error' => 'Invalid IP address format']);
+                exit();
+            }
+            
+            if ($ipRangeFrom > $ipRangeTo) {
+                echo json_encode(['error' => 'IP range from must be less than or equal to IP range to']);
+                exit();
+            }
+            
+            // Check if range is large enough for requested number of users
+            $rangeSize = $ipRangeTo - $ipRangeFrom + 1;
+            if ($rangeSize < $numUsers) {
+                echo json_encode(['error' => 'IP range is too small for the requested number of users']);
+                exit();
+            }
+        }
 
         $newUsers = [];
         $addedUsers = 0;
@@ -605,9 +648,83 @@ $allRoutes = getPeerRoutes();
         </table>
     </div>
     <div class="d-flex justify-content-center flex-wrap">
-        <button class="btn btn-success me-2 mb-2" data-bs-toggle="modal" data-bs-target="#userModal" onclick="resetForm()">Add User</button>
+        <button class="btn btn-success me-2 mb-2" data-bs-toggle="modal" data-bs-target="#userModal">Add User</button>
         <button class="btn btn-secondary mb-2" data-bs-toggle="modal" data-bs-target="#multipleUsersModal">Add Multiple Users</button>
         <button class="btn btn-info mb-2 ms-2" data-bs-toggle="modal" data-bs-target="#routesModal">Manage Routes</button>
+    </div>
+
+    <!-- Add User Modal -->
+    <div class="modal fade" id="userModal" tabindex="-1" aria-labelledby="userModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="userModalLabel">Add New User</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addUserForm">
+                        <div class="mb-3">
+                            <label for="client" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="client" name="client" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="server" class="form-label">Server</label>
+                            <input type="text" class="form-control" id="server" name="server" value="*" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label for="secret" class="form-label">Password</label>
+                            <input type="text" class="form-control" id="secret" name="secret" required>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="manualIpCheck" onchange="toggleManualIp('single')">
+                            <label class="form-check-label" for="manualIpCheck">Set IP manually</label>
+                        </div>
+                        <div class="mb-3" id="ipInputSingle" style="display: none;">
+                            <label for="ip" class="form-label">IP Address</label>
+                            <input type="text" class="form-control" id="ip" name="ip">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="addUserButton">Add User</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Multiple Users Modal -->
+    <div class="modal fade" id="multipleUsersModal" tabindex="-1" aria-labelledby="multipleUsersModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="multipleUsersModalLabel">Add Multiple Users</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addMultipleUsersForm">
+                        <div class="mb-3">
+                            <label for="numUsers" class="form-label">Number of Users</label>
+                            <input type="number" class="form-control" id="numUsers" name="numUsers" min="1" max="100" required>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="manualIpCheckMultiple" onchange="toggleManualIp('multiple')">
+                            <label class="form-check-label" for="manualIpCheckMultiple">Set IP range manually</label>
+                        </div>
+                        <div class="mb-3" id="ipInputMultiple" style="display: none;">
+                            <label for="ipRangeFrom" class="form-label">IP Range From</label>
+                            <input type="text" class="form-control" id="ipRangeFrom" name="ipRangeFrom">
+                            <label for="ipRangeTo" class="form-label">IP Range To</label>
+                            <input type="text" class="form-control" id="ipRangeTo" name="ipRangeTo">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="addMultipleUsersButton">Add Users</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Confirm Delete Modal -->
@@ -759,13 +876,48 @@ $allRoutes = getPeerRoutes();
 <script>
     // Handle user form submission
     const addUserForm = document.getElementById('addUserForm');
-    if (addUserForm) {
-        addUserForm.addEventListener('submit', function(event) {
-            event.preventDefault();
+    const addUserButton = document.getElementById('addUserButton');
+    if (addUserForm && addUserButton) {
+        addUserButton.addEventListener('click', function() {
             const client = document.getElementById('client').value;
             const server = document.getElementById('server').value;
             const secret = document.getElementById('secret').value;
             const ip = document.getElementById('manualIpCheck').checked ? document.getElementById('ip').value : '';
+
+            // Client-side validation for username and IP uniqueness
+            // Note: This is just for immediate feedback; server-side validation is still required
+            const existingUsers = Array.from(document.querySelectorAll('#userTable tr')).slice(1); // Skip header row
+            let usernameExists = false;
+            let ipExists = false;
+            
+            for (const row of existingUsers) {
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 4) {
+                    const existingUsername = cells[0].textContent.trim();
+                    const existingIp = cells[3].textContent.trim();
+                    
+                    if (existingUsername === client) {
+                        usernameExists = true;
+                    }
+                    if (existingIp === ip && ip !== '') {
+                        ipExists = true;
+                    }
+                }
+            }
+
+            if (usernameExists) {
+                document.getElementById('errorMessage').textContent = 'Username already exists';
+                document.getElementById('errorModal').classList.add('show');
+                document.getElementById('errorModal').style.display = 'block';
+                return;
+            }
+
+            if (ipExists) {
+                document.getElementById('errorMessage').textContent = 'IP address already exists';
+                document.getElementById('errorModal').classList.add('show');
+                document.getElementById('errorModal').style.display = 'block';
+                return;
+            }
 
             const formData = new FormData();
             formData.append('add', '1');
@@ -774,10 +926,15 @@ $allRoutes = getPeerRoutes();
             formData.append('secret', secret);
             if (ip) formData.append('ip', ip);
 
+            // Show loading indicator
+            const originalButtonText = addUserButton.textContent;
+            addUserButton.textContent = 'Adding...';
+            addUserButton.disabled = true;
+
             fetch('', {
                 method: 'POST',
                 body: formData
-            }).then(response => response.json())  // Expecting JSON response from the server
+            }).then(response => response.json())
                 .then(data => {
                     if (data.error) {
                         document.getElementById('errorMessage').textContent = data.error;
@@ -793,15 +950,39 @@ $allRoutes = getPeerRoutes();
                       <td>${server}</td>
                       <td>${secret}</td>
                       <td>${data.ip}</td>  <!-- Use the IP returned from the server -->
-                      <td>No routes</td>
+                      <td class="routes-cell">
+                        <div class="routes-content" id="routes-content-${newIndex}">
+                            <div class="text-muted">No routes configured</div>
+                        </div>
+                        <div class="route-actions">
+                            <button class="btn btn-sm btn-outline-primary" onclick="openAddRouteModal('${data.ip}', '${client}')" title="Add route">+ Add Route</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="applyRoutes('${data.ip}', ${newIndex})" title="Apply routes">▶ Apply</button>
+                            <button class="btn btn-sm btn-outline-info" onclick="refreshUserRoutes('${data.ip}', ${newIndex})" title="Refresh routes">↻</button>
+                        </div>
+                      </td>
                       <td>
-                          <button class="btn btn-danger btn-sm" onclick="confirmDelete(${newIndex})" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
+                          <div class="user-actions">
+                              <button class="btn btn-danger btn-sm" onclick="confirmDelete(${newIndex})" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete User</button>
+                          </div>
                       </td>
                   `;
                         document.getElementById('userTable').appendChild(newRow);
-                        resetForm();
+                        document.getElementById('addUserForm').reset();
                         document.querySelector('#userModal .btn-close').click();
+                        // Hide manual IP input if it was shown
+                        document.getElementById('ipInputSingle').style.display = 'none';
                     }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('errorMessage').textContent = 'Network error: ' + error.message;
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
+                })
+                .finally(() => {
+                    // Restore button state
+                    addUserButton.textContent = originalButtonText;
+                    addUserButton.disabled = false;
                 });
         });
     }
@@ -816,12 +997,38 @@ $allRoutes = getPeerRoutes();
     }
 
     const addMultipleUsersForm = document.getElementById('addMultipleUsersForm');
-    if (addMultipleUsersForm) {
-        addMultipleUsersForm.addEventListener('submit', function(event) {
-            event.preventDefault();
+    const addMultipleUsersButton = document.getElementById('addMultipleUsersButton');
+    if (addMultipleUsersForm && addMultipleUsersButton) {
+        addMultipleUsersButton.addEventListener('click', function() {
             const numUsers = document.getElementById('numUsers').value;
             const ipRangeFrom = document.getElementById('manualIpCheckMultiple').checked ? document.getElementById('ipRangeFrom').value : '';
             const ipRangeTo = document.getElementById('manualIpCheckMultiple').checked ? document.getElementById('ipRangeTo').value : '';
+
+            // Validate inputs
+            if (numUsers <= 0) {
+                document.getElementById('errorMessage').textContent = 'Number of users must be greater than 0';
+                document.getElementById('errorModal').classList.add('show');
+                document.getElementById('errorModal').style.display = 'block';
+                return;
+            }
+
+            if (document.getElementById('manualIpCheckMultiple').checked) {
+                if (!ipRangeFrom || !ipRangeTo) {
+                    document.getElementById('errorMessage').textContent = 'Please provide both IP range from and to values';
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
+                    return;
+                }
+                
+                // Basic IP validation
+                const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+                if (!ipRegex.test(ipRangeFrom) || !ipRegex.test(ipRangeTo)) {
+                    document.getElementById('errorMessage').textContent = 'Please provide valid IP addresses';
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
+                    return;
+                }
+            }
 
             const formData = new FormData();
             formData.append('addMultiple', '1');
@@ -830,6 +1037,11 @@ $allRoutes = getPeerRoutes();
                 formData.append('ipRangeFrom', ipRangeFrom);
                 formData.append('ipRangeTo', ipRangeTo);
             }
+
+            // Show loading indicator
+            const originalButtonText = addMultipleUsersButton.textContent;
+            addMultipleUsersButton.textContent = 'Adding...';
+            addMultipleUsersButton.disabled = true;
 
             fetch('', {
                 method: 'POST',
@@ -843,6 +1055,17 @@ $allRoutes = getPeerRoutes();
                     } else {
                         location.reload();
                     }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('errorMessage').textContent = 'Network error: ' + error.message;
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
+                })
+                .finally(() => {
+                    // Restore button state
+                    addMultipleUsersButton.textContent = originalButtonText;
+                    addMultipleUsersButton.disabled = false;
                 });
         });
     }
@@ -958,6 +1181,12 @@ $allRoutes = getPeerRoutes();
                         document.getElementById('errorModal').classList.add('show');
                         document.getElementById('errorModal').style.display = 'block';
                     }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('errorMessage').textContent = 'Network error: ' + error.message;
+                    document.getElementById('errorModal').classList.add('show');
+                    document.getElementById('errorModal').style.display = 'block';
                 });
         });
     }
