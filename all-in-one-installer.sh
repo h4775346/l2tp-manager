@@ -11,6 +11,8 @@ echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}   L2TP Manager - All-in-One Installer${NC}"
 echo -e "${BLUE}============================================${NC}"
 echo ""
+echo -e "${BLUE}                    By Abanoub              ${NC}"
+echo ""
 
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
