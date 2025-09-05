@@ -610,6 +610,26 @@ $allRoutes = getPeerRoutes();
         <button class="btn btn-info mb-2 ms-2" data-bs-toggle="modal" data-bs-target="#routesModal">Manage Routes</button>
     </div>
 
+    <!-- Confirm Delete Modal -->
+    <div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-labelledby="confirmDeleteModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmDeleteModalLabel">Confirm Delete</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete this user?</p>
+                    <input type="hidden" id="deleteIndex" value="">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteButton">Delete User</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <!-- Routes Modal -->
 <div class="modal fade" id="routesModal" tabindex="-1" aria-labelledby="routesModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl">
@@ -873,6 +893,35 @@ $allRoutes = getPeerRoutes();
 
     function confirmDelete(index) {
         document.getElementById('deleteIndex').value = index;
+    }
+
+    // Handle user deletion
+    const confirmDeleteButton = document.getElementById('confirmDeleteButton');
+    if (confirmDeleteButton) {
+        confirmDeleteButton.addEventListener('click', function() {
+            const index = document.getElementById('deleteIndex').value;
+
+            const formData = new FormData();
+            formData.append('delete', '1');
+            formData.append('index', index);
+
+            fetch('', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.text())
+                .then(data => {
+                    const row = document.getElementById(`user-${index}`);
+                    row.classList.add('fade-out');
+                    setTimeout(() => {
+                        if (row) row.remove();
+                        document.querySelector('#confirmDeleteModal .btn-close').click();
+                    }, 500);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error deleting user');
+                });
+        });
     }
 
     // Handle password change
