@@ -46,9 +46,24 @@ echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}   Installation Complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo ""
+
+# Get server IP address
+SERVER_IP=$(hostname -I | awk '{print $1}')
+if [ -z "$SERVER_IP" ]; then
+    # Fallback: try to get IP from default route interface
+    SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{print $7}' | head -1)
+fi
+if [ -z "$SERVER_IP" ]; then
+    # Final fallback: try to get from ip addr
+    SERVER_IP=$(ip addr show | grep -oP 'inet \K[\d.]+' | grep -v '^127\.' | head -1)
+fi
+if [ -z "$SERVER_IP" ]; then
+    SERVER_IP="your-server-ip"
+fi
+
 echo -e "${BLUE}Access your L2TP Manager:${NC}"
-echo -e "  HTTP : http://your-server-ip:8090/l2tp-manager/"
-echo -e "  HTTPS: https://your-server-ip:8099/l2tp-manager/"
+echo -e "  HTTP : http://${SERVER_IP}:8090/l2tp-manager/"
+echo -e "  HTTPS: https://${SERVER_IP}:8099/l2tp-manager/"
 echo ""
 echo -e "${YELLOW}Default Credentials:${NC}"
 echo -e "  Username: admin"

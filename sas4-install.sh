@@ -57,18 +57,15 @@ echo ""
 
 # Clone the project
 echo -e "${CYAN}📥 Cloning L2TP Manager repository...${NC}"
-if [ ! -d "$TARGET_DIR" ]; then
-    echo -e "${YELLOW}Cloning repository to $TARGET_DIR${NC}"
-    git clone $REPO_URL $TARGET_DIR
-else
-    echo -e "${YELLOW}Directory $TARGET_DIR already exists. Pulling latest changes.${NC}"
-    git config --global --add safe.directory $TARGET_DIR
-    cd $TARGET_DIR
-    git stash
-    git pull
+if [ -d "$TARGET_DIR" ]; then
+    echo -e "${YELLOW}Removing existing directory $TARGET_DIR${NC}"
+    rm -rf "$TARGET_DIR"
 fi
 
-echo -e "${GREEN}✅ Repository cloned/updated successfully${NC}"
+echo -e "${YELLOW}Cloning repository to $TARGET_DIR${NC}"
+git clone $REPO_URL $TARGET_DIR
+
+echo -e "${GREEN}✅ Repository cloned successfully${NC}"
 echo ""
 
 # Permissions
