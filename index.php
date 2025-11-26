@@ -1,11 +1,20 @@
 <?php
 include 'header.php';
-session_start();
+
+// Check session timeout
+if (!checkSessionTimeout()) {
+    session_destroy();
+    header('Location: login.php?expired=1');
+    exit();
+}
 
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     header('Location: login.php');
     exit();
 }
+
+// Update last activity
+$_SESSION['last_activity'] = time();
 
 $config = include 'config.php';
 $file = $config['chap_secrets_path'];
@@ -31,13 +40,31 @@ function readUsers($file) {
 
 // Write the array back to the file
 function writeUsers($file, $users) {
+    // Validate file path to prevent directory traversal
+    $baseDir = dirname($file);
+    $validatedPath = validateFilePath(basename($file), $baseDir);
+    if ($validatedPath === false) {
+        throw new Exception('Invalid file path');
+    }
+    
     $content = "# Secrets for authentication using CHAP\n";
     $content .= "# client server secret IP addresses\n";
     $content .= "tunnel tunnel tunnel *\n";
     foreach ($users as $user) {
-        $content .= "{$user['client']} {$user['server']} {$user['secret']} {$user['ip']}\n";
+        // Sanitize user data before writing
+        $client = preg_replace('/[^a-zA-Z0-9_-]/', '', $user['client']);
+        $server = preg_replace('/[^*a-zA-Z0-9_-]/', '', $user['server']);
+        $secret = preg_replace('/[\x00-\x1F\x7F]/', '', $user['secret']); // Remove control characters
+        $ip = preg_replace('/[^0-9.*]/', '', $user['ip']);
+        
+        // Validate IP format
+        if (!validateIP($ip) && $ip !== '*') {
+            continue; // Skip invalid IPs
+        }
+        
+        $content .= "{$client} {$server} {$secret} {$ip}\n";
     }
-    file_put_contents($file, $content);
+    file_put_contents($validatedPath, $content);
 }
 
 // Generate random password
@@ -94,7 +121,27 @@ function getNextIp($users) {
 
 // Function to execute l2tp-routectl command
 function executeRouteCommand($command) {
-    $fullCommand = "sudo /usr/local/sbin/l2tp-routectl " . $command . " 2>&1";
+    // Validate command structure - only allow specific commands
+    $allowedCommands = ['list', 'add', 'del', 'apply'];
+    $commandParts = explode(' ', trim($command));
+    $mainCommand = $commandParts[0] ?? '';
+    
+    if (!in_array($mainCommand, $allowedCommands)) {
+        return [
+            'output' => 'Invalid command',
+            'returnCode' => 1
+        ];
+    }
+    
+    // Additional validation: ensure command doesn't contain dangerous characters
+    if (preg_match('/[;&|`$(){}]/', $command)) {
+        return [
+            'output' => 'Invalid characters in command',
+            'returnCode' => 1
+        ];
+    }
+    
+    $fullCommand = "sudo /usr/local/sbin/l2tp-routectl " . escapeshellcmd($command) . " 2>&1";
     exec($fullCommand, $output, $returnCode);
     return [
         'output' => implode("\n", $output),
@@ -169,6 +216,28 @@ function getPeerRoutesFormatted($peerIp) {
 
 // Function to add a route
 function addPeerRoute($peerIp, $destination, $gateway = null) {
+    // Validate all inputs before processing
+    if (!validateIP($peerIp)) {
+        return [
+            'output' => 'Invalid peer IP address',
+            'returnCode' => 1
+        ];
+    }
+    
+    if (!validateCIDR($destination)) {
+        return [
+            'output' => 'Invalid destination CIDR format',
+            'returnCode' => 1
+        ];
+    }
+    
+    if ($gateway !== null && !validateGateway($gateway)) {
+        return [
+            'output' => 'Invalid gateway IP address',
+            'returnCode' => 1
+        ];
+    }
+    
     $command = "add --peer " . escapeshellarg($peerIp) . " --dst " . escapeshellarg($destination);
     if ($gateway) {
         $command .= " --gw " . escapeshellarg($gateway);
@@ -179,19 +248,38 @@ function addPeerRoute($peerIp, $destination, $gateway = null) {
 
 // Function to delete a route
 function deletePeerRoute($peerIp, $destination) {
+    // Validate inputs before processing
+    if (!validateIP($peerIp)) {
+        return [
+            'output' => 'Invalid peer IP address',
+            'returnCode' => 1
+        ];
+    }
+    
+    // Validate destination (can be CIDR or 'all')
+    if ($destination !== 'all' && !validateCIDR($destination)) {
+        return [
+            'output' => 'Invalid destination format',
+            'returnCode' => 1
+        ];
+    }
+    
     // First delete from the file
     $command = "del --peer " . escapeshellarg($peerIp) . " --dst " . escapeshellarg($destination);
     $result = executeRouteCommand($command);
     
     // Then delete from the actual routing table
-    if ($result['returnCode'] === 0) {
+    if ($result['returnCode'] === 0 && $destination !== 'all') {
         // Get the PPP interface for this peer
         $pppInterface = getPPPInterfaceForPeer($peerIp);
         if ($pppInterface) {
-            // Delete the route from the actual routing table
-            $deleteCommand = "sudo ip route del " . escapeshellarg($destination) . " dev " . escapeshellarg($pppInterface) . " 2>&1";
-            exec($deleteCommand, $output, $returnCode);
-            // We don't return this result as the main operation (deleting from file) was successful
+            // Validate CIDR before using in command
+            if (validateCIDR($destination)) {
+                // Delete the route from the actual routing table
+                $deleteCommand = "sudo ip route del " . escapeshellarg($destination) . " dev " . escapeshellarg($pppInterface) . " 2>&1";
+                exec($deleteCommand, $output, $returnCode);
+                // We don't return this result as the main operation (deleting from file) was successful
+            }
         }
     }
     
@@ -200,11 +288,22 @@ function deletePeerRoute($peerIp, $destination) {
 
 // Function to get PPP interface for a peer IP
 function getPPPInterfaceForPeer($peerIp) {
+    // Validate IP before using in command
+    if (!validateIP($peerIp)) {
+        return null;
+    }
+    
     $command = "ip link show | grep ppp | cut -d: -f2 | tr -d ' '";
     exec($command, $interfaces, $returnCode);
     
     if ($returnCode === 0 && !empty($interfaces)) {
         foreach ($interfaces as $interface) {
+            // Sanitize interface name (should only contain alphanumeric and specific chars)
+            $interface = preg_replace('/[^a-zA-Z0-9]/', '', $interface);
+            if (empty($interface)) {
+                continue;
+            }
+            
             // Check if this interface has the peer IP
             $addrCommand = "ip addr show " . escapeshellarg($interface) . " | grep 'peer " . escapeshellarg($peerIp) . "'";
             exec($addrCommand, $output, $addrReturnCode);
@@ -219,12 +318,28 @@ function getPPPInterfaceForPeer($peerIp) {
 
 // Function to apply routes for a peer
 function applyPeerRoutes($peerIp) {
+    // Validate IP before processing
+    if (!validateIP($peerIp)) {
+        return [
+            'output' => 'Invalid peer IP address',
+            'returnCode' => 1
+        ];
+    }
+    
     $command = "apply --peer " . escapeshellarg($peerIp);
     return executeRouteCommand($command);
 }
 
 // Function to delete all routes for a peer
 function deleteAllPeerRoutes($peerIp) {
+    // Validate IP before processing
+    if (!validateIP($peerIp)) {
+        return [
+            'output' => 'Invalid peer IP address',
+            'returnCode' => 1
+        ];
+    }
+    
     $command = "del --peer " . escapeshellarg($peerIp) . " --dst all";
     return executeRouteCommand($command);
 }
@@ -238,6 +353,16 @@ foreach ($users as &$user) {
 unset($user); // Break the reference
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // CSRF protection - check token for all POST requests except logout
+    if (!isset($_POST['logout'])) {
+        $csrfToken = $_POST['csrf_token'] ?? '';
+        if (!validateCSRFToken($csrfToken)) {
+            http_response_code(403);
+            echo json_encode(['error' => safeErrorMessage('Invalid security token')]);
+            exit();
+        }
+    }
+    
     // Handle logout
     if (isset($_POST['logout'])) {
         session_destroy();
@@ -247,28 +372,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Handle add user
     if (isset($_POST['add'])) {
-        $client = $_POST['client'];
-        $ip = $_POST['ip'] ?? getNextIp($users);
+        $client = sanitizeInput($_POST['client'] ?? '');
+        $ip = sanitizeInput($_POST['ip'] ?? '');
+        $secret = $_POST['secret'] ?? '';
 
         // Validate input
         if (empty($client)) {
-            echo json_encode(['error' => 'Username is required']);
+            echo json_encode(['error' => safeErrorMessage('Username is required')]);
             exit();
         }
         
-        if (empty($_POST['secret'])) {
-            echo json_encode(['error' => 'Password is required']);
+        if (!validateUsername($client)) {
+            echo json_encode(['error' => safeErrorMessage('Invalid username format')]);
             exit();
+        }
+        
+        if (empty($secret)) {
+            echo json_encode(['error' => safeErrorMessage('Password is required')]);
+            exit();
+        }
+        
+        // Validate password length
+        if (strlen($secret) > 128) {
+            echo json_encode(['error' => safeErrorMessage('Password is too long')]);
+            exit();
+        }
+        
+        // Validate IP if provided
+        if (!empty($ip)) {
+            if (!validateIP($ip)) {
+                echo json_encode(['error' => safeErrorMessage('Invalid IP address format')]);
+                exit();
+            }
+        } else {
+            $ip = getNextIp($users);
         }
 
         // Check for duplicate username and IP
         foreach ($users as $user) {
             if ($user['client'] === $client) {
-                echo json_encode(['error' => 'Username already exists']);
+                echo json_encode(['error' => safeErrorMessage('Username already exists')]);
                 exit();
             }
             if ($user['ip'] === $ip) {
-                echo json_encode(['error' => 'IP address already exists']);
+                echo json_encode(['error' => safeErrorMessage('IP address already exists')]);
                 exit();
             }
         }
@@ -276,61 +423,98 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $newUser = [
             'client' => $client,
             'server' => '*',
-            'secret' => $_POST['secret'],
+            'secret' => $secret,
             'ip' => $ip
         ];
         $users[] = $newUser;
-        writeUsers($file, $users);
-        echo json_encode(['ip' => $newUser['ip']]);
+        try {
+            writeUsers($file, $users);
+            echo json_encode(['ip' => sanitizeOutput($newUser['ip'])]);
+        } catch (Exception $e) {
+            echo json_encode(['error' => safeErrorMessage('Failed to save user')]);
+        }
         exit();
     } elseif (isset($_POST['delete'])) {
-        $index = (int)$_POST['index'];
+        $index = (int)($_POST['index'] ?? -1);
+        
+        // Validate index
+        if ($index < 0 || $index >= count($users)) {
+            echo json_encode(['error' => safeErrorMessage('Invalid user index')]);
+            exit();
+        }
         
         // Get the IP of the user being deleted
         $userIp = $users[$index]['ip'];
         
-        // Delete all routes associated with this user
-        deleteAllPeerRoutes($userIp);
+        // Validate IP before deletion
+        if (validateIP($userIp)) {
+            // Delete all routes associated with this user
+            deleteAllPeerRoutes($userIp);
+        }
         
         // Delete the user
         array_splice($users, $index, 1);
-        writeUsers($file, $users);
+        try {
+            writeUsers($file, $users);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            echo json_encode(['error' => safeErrorMessage('Failed to delete user')]);
+        }
         exit();
     } elseif (isset($_POST['addMultiple'])) {
-        $numUsers = (int)$_POST['numUsers'];
+        $numUsers = (int)($_POST['numUsers'] ?? 0);
         
         // Validate input
         if ($numUsers <= 0) {
-            echo json_encode(['error' => 'Number of users must be greater than 0']);
+            echo json_encode(['error' => safeErrorMessage('Number of users must be greater than 0')]);
             exit();
         }
         
         if ($numUsers > 100) {
-            echo json_encode(['error' => 'Number of users cannot exceed 100']);
+            echo json_encode(['error' => safeErrorMessage('Number of users cannot exceed 100')]);
             exit();
         }
 
-        $ipRangeFrom = !empty($_POST['ipRangeFrom']) ? ip2long($_POST['ipRangeFrom']) : ip2long(getNextIp($users));
-        $ipRangeTo = !empty($_POST['ipRangeTo']) ? ip2long($_POST['ipRangeTo']) : $ipRangeFrom + $numUsers - 1;
+        $ipRangeFromInput = sanitizeInput($_POST['ipRangeFrom'] ?? '');
+        $ipRangeToInput = sanitizeInput($_POST['ipRangeTo'] ?? '');
+        
+        // Validate IP addresses if provided
+        if (!empty($ipRangeFromInput)) {
+            if (!validateIP($ipRangeFromInput)) {
+                echo json_encode(['error' => safeErrorMessage('Invalid IP address format')]);
+                exit();
+            }
+            $ipRangeFrom = ip2long($ipRangeFromInput);
+        } else {
+            $ipRangeFrom = ip2long(getNextIp($users));
+        }
+        
+        if (!empty($ipRangeToInput)) {
+            if (!validateIP($ipRangeToInput)) {
+                echo json_encode(['error' => safeErrorMessage('Invalid IP address format')]);
+                exit();
+            }
+            $ipRangeTo = ip2long($ipRangeToInput);
+        } else {
+            $ipRangeTo = $ipRangeFrom + $numUsers - 1;
+        }
 
         // Validate IP range
-        if (!empty($_POST['ipRangeFrom']) && !empty($_POST['ipRangeTo'])) {
-            if ($ipRangeFrom === false || $ipRangeTo === false) {
-                echo json_encode(['error' => 'Invalid IP address format']);
-                exit();
-            }
-            
-            if ($ipRangeFrom > $ipRangeTo) {
-                echo json_encode(['error' => 'IP range from must be less than or equal to IP range to']);
-                exit();
-            }
-            
-            // Check if range is large enough for requested number of users
-            $rangeSize = $ipRangeTo - $ipRangeFrom + 1;
-            if ($rangeSize < $numUsers) {
-                echo json_encode(['error' => 'IP range is too small for the requested number of users']);
-                exit();
-            }
+        if ($ipRangeFrom === false || $ipRangeTo === false) {
+            echo json_encode(['error' => safeErrorMessage('Invalid IP address format')]);
+            exit();
+        }
+        
+        if ($ipRangeFrom > $ipRangeTo) {
+            echo json_encode(['error' => safeErrorMessage('IP range from must be less than or equal to IP range to')]);
+            exit();
+        }
+        
+        // Check if range is large enough for requested number of users
+        $rangeSize = $ipRangeTo - $ipRangeFrom + 1;
+        if ($rangeSize < $numUsers) {
+            echo json_encode(['error' => safeErrorMessage('IP range is too small for the requested number of users')]);
+            exit();
         }
 
         $newUsers = [];
@@ -355,8 +539,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Ensure the IP range does not exceed the defined ranges
             if ($ipRangeFrom + $i > ip2long('10.255.255.254')) {
-                echo json_encode(['error' => 'IP range exhausted. Please start a new range.']);
+                echo json_encode(['error' => safeErrorMessage('IP range exhausted. Please start a new range.')]);
                 exit();
+            }
+            
+            // Validate generated IP
+            if (!validateIP($userIp)) {
+                continue; // Skip invalid IPs
             }
 
             $newUsers[] = [
@@ -369,28 +558,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $users = array_merge($users, $newUsers);
-        writeUsers($file, $users);
-        echo json_encode(['success' => true]);
+        try {
+            writeUsers($file, $users);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            echo json_encode(['error' => safeErrorMessage('Failed to save users')]);
+        }
         exit();
     } elseif (isset($_POST['changePassword'])) {
-        $newPassword = password_hash($_POST['newPassword'], PASSWORD_DEFAULT);
+        $oldPassword = $_POST['oldPassword'] ?? '';
+        $newPassword = $_POST['newPassword'] ?? '';
+        $confirmPassword = $_POST['confirmPassword'] ?? '';
+
+        // Validate inputs
+        if (empty($oldPassword) || empty($newPassword) || empty($confirmPassword)) {
+            echo json_encode(['error' => safeErrorMessage('All password fields are required')]);
+            exit();
+        }
+        
+        // Validate new password
+        if (!validatePassword($newPassword)) {
+            echo json_encode(['error' => safeErrorMessage('Password must be between 8 and 128 characters')]);
+            exit();
+        }
+        
+        if ($newPassword !== $confirmPassword) {
+            echo json_encode(['error' => safeErrorMessage('New password and confirmation do not match')]);
+            exit();
+        }
 
         // Read the config file
         $config = include 'config.php';
+        
+        // Verify old password
+        if (!password_verify($oldPassword, $config['admin_password'])) {
+            echo json_encode(['error' => safeErrorMessage('Current password is incorrect')]);
+            exit();
+        }
+        
+        // Check if new password is same as old password
+        if (password_verify($newPassword, $config['admin_password'])) {
+            echo json_encode(['error' => safeErrorMessage('New password must be different from current password')]);
+            exit();
+        }
 
         // Update the password in the config file
-        $config['admin_password'] = $newPassword;
+        $config['admin_password'] = password_hash($newPassword, PASSWORD_DEFAULT);
+
+        // Validate config file path
+        $configPath = __DIR__ . '/config.php';
+        $validatedPath = validateFilePath('config.php', __DIR__);
+        if ($validatedPath === false) {
+            echo json_encode(['error' => safeErrorMessage('Invalid config file path')]);
+            exit();
+        }
 
         // Write the updated config back to the file
-        file_put_contents('config.php', '<?php return ' . var_export($config, true) . ';');
-
-        echo json_encode(['success' => true]);
+        try {
+            file_put_contents($validatedPath, '<?php return ' . var_export($config, true) . ';');
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            echo json_encode(['error' => safeErrorMessage('Failed to update password')]);
+        }
         exit();
     } elseif (isset($_POST['addRoute'])) {
-        $peerIp = $_POST['peerIp'];
-        $destination = $_POST['destination'];
-        $gateway = !empty($_POST['gateway']) ? $_POST['gateway'] : null;
+        $peerIp = sanitizeInput($_POST['peerIp'] ?? '');
+        $destination = sanitizeInput($_POST['destination'] ?? '');
+        $gateway = !empty($_POST['gateway']) ? sanitizeInput($_POST['gateway']) : null;
 
+        // Validate inputs
+        if (empty($peerIp) || empty($destination)) {
+            echo json_encode(['error' => safeErrorMessage('Peer IP and destination are required')]);
+            exit();
+        }
         
         $result = addPeerRoute($peerIp, $destination, $gateway);
         
@@ -402,45 +642,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $result['applyReturnCode'] = $applyResult['returnCode'];
         }
         
+        // Sanitize output before returning
+        $result['output'] = sanitizeOutput($result['output'] ?? '');
+        if (isset($result['applyOutput'])) {
+            $result['applyOutput'] = sanitizeOutput($result['applyOutput']);
+        }
+        
         echo json_encode($result);
         exit();
     } elseif (isset($_POST['deleteRoute'])) {
-        $peerIp = $_POST['peerIp'];
-        $destination = $_POST['destination'];
+        $peerIp = sanitizeInput($_POST['peerIp'] ?? '');
+        $destination = sanitizeInput($_POST['destination'] ?? '');
+
+        // Validate inputs
+        if (empty($peerIp) || empty($destination)) {
+            echo json_encode(['error' => safeErrorMessage('Peer IP and destination are required')]);
+            exit();
+        }
 
         $result = deletePeerRoute($peerIp, $destination);
+        
+        // Sanitize output before returning
+        $result['output'] = sanitizeOutput($result['output'] ?? '');
+        
         echo json_encode($result);
         exit();
     } elseif (isset($_POST['applyRoutes'])) {
-        $peerIp = $_POST['peerIp'];
+        $peerIp = sanitizeInput($_POST['peerIp'] ?? '');
+        
+        // Validate input
+        if (empty($peerIp)) {
+            echo json_encode(['error' => safeErrorMessage('Peer IP is required')]);
+            exit();
+        }
+        
         $result = applyPeerRoutes($peerIp);
+        
+        // Sanitize output before returning
+        $result['output'] = sanitizeOutput($result['output'] ?? '');
+        
         echo json_encode($result);
         exit();
     } elseif (isset($_POST['listRoutes'])) {
         $allRoutes = getPeerRoutes();
-        echo $allRoutes;
+        echo sanitizeOutput($allRoutes);
         exit();
     } elseif (isset($_POST['getUserRoutes'])) {
-        $peerIp = $_POST['peerIp'];
+        $peerIp = sanitizeInput($_POST['peerIp'] ?? '');
+        
+        // Validate input
+        if (empty($peerIp) || !validateIP($peerIp)) {
+            echo json_encode(['error' => safeErrorMessage('Invalid peer IP')]);
+            exit();
+        }
+        
         $routes = getPeerRoutesFormatted($peerIp);
-        echo json_encode(['routes' => $routes]);
+        echo json_encode(['routes' => sanitizeOutput($routes)]);
         exit();
     } elseif (isset($_POST['getAllUsersRoutes'])) {
         $allRoutes = [];
         foreach ($users as $user) {
-            $allRoutes[$user['ip']] = getPeerRoutesFormatted($user['ip']);
+            if (validateIP($user['ip'])) {
+                $allRoutes[sanitizeOutput($user['ip'])] = sanitizeOutput(getPeerRoutesFormatted($user['ip']));
+            }
         }
         echo json_encode($allRoutes);
         exit();
     } elseif (isset($_POST['getUserRoutesArray'])) {
-        $peerIp = $_POST['peerIp'];
+        $peerIp = sanitizeInput($_POST['peerIp'] ?? '');
+        
+        // Validate input
+        if (empty($peerIp) || !validateIP($peerIp)) {
+            echo json_encode(['error' => safeErrorMessage('Invalid peer IP')]);
+            exit();
+        }
+        
         $routes = getPeerRoutesArray($peerIp);
+        // Sanitize each route
+        $routes = array_map('sanitizeOutput', $routes);
         echo json_encode(['routes' => $routes]);
         exit();
     } elseif (isset($_POST['getAllUsersRoutesArray'])) {
         $allRoutes = [];
         foreach ($users as $user) {
-            $allRoutes[$user['ip']] = ['routes' => getPeerRoutesArray($user['ip'])];
+            if (validateIP($user['ip'])) {
+                $routes = getPeerRoutesArray($user['ip']);
+                // Sanitize each route
+                $routes = array_map('sanitizeOutput', $routes);
+                $allRoutes[sanitizeOutput($user['ip'])] = ['routes' => $routes];
+            }
         }
         echo json_encode($allRoutes);
         exit();
@@ -585,6 +875,7 @@ $allRoutes = getPeerRoutes();
                 </li>
                 <li class="nav-item">
                     <form method="post" action="index.php" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="<?php echo sanitizeOutput(generateCSRFToken()); ?>">
                         <button type="submit" name="logout" class="btn btn-danger nav-link">Logout</button>
                     </form>
                 </li>
@@ -611,10 +902,10 @@ $allRoutes = getPeerRoutes();
             <tbody id="userTable">
             <?php foreach ($users as $index => $user): ?>
                 <tr id="user-<?php echo $index; ?>">
-                    <td><?php echo htmlspecialchars($user['client']); ?></td>
-                    <td><?php echo htmlspecialchars($user['server']); ?></td>
-                    <td><?php echo htmlspecialchars($user['secret']); ?></td>
-                    <td><?php echo htmlspecialchars($user['ip']); ?></td>
+                    <td><?php echo sanitizeOutput($user['client']); ?></td>
+                    <td><?php echo sanitizeOutput($user['server']); ?></td>
+                    <td><?php echo sanitizeOutput($user['secret']); ?></td>
+                    <td><?php echo sanitizeOutput($user['ip']); ?></td>
                     <td class="routes-cell">
                         <div class="routes-content" id="routes-content-<?php echo $index; ?>">
                             <?php 
@@ -625,21 +916,38 @@ $allRoutes = getPeerRoutes();
                             <?php else: ?>
                                 <?php foreach ($routes as $route): ?>
                                     <div class="route-item">
-                                        <span class="route-text"><?php echo htmlspecialchars($route); ?></span>
-                                        <button class="btn btn-danger btn-sm route-delete-btn" onclick="deleteRoute('<?php echo $user['ip']; ?>', '<?php echo htmlspecialchars(addslashes($route)); ?>', <?php echo $index; ?>)" title="Delete route">×</button>
+                                        <span class="route-text"><?php echo sanitizeOutput($route); ?></span>
+                                        <button class="btn btn-danger btn-sm route-delete-btn" 
+                                                data-peer-ip="<?php echo sanitizeOutput($user['ip']); ?>" 
+                                                data-route="<?php echo sanitizeOutput($route); ?>" 
+                                                data-row-index="<?php echo (int)$index; ?>"
+                                                onclick="deleteRoute(this)" title="Delete route">×</button>
                                     </div>
                                 <?php endforeach; ?>
                             <?php endif; ?>
                         </div>
                         <div class="route-actions">
-                            <button class="btn btn-sm btn-outline-primary" onclick="openAddRouteModal('<?php echo $user['ip']; ?>', '<?php echo htmlspecialchars(addslashes($user['client'])); ?>')" title="Add route">+ Add Route</button>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="applyRoutes('<?php echo $user['ip']; ?>', <?php echo $index; ?>)" title="Apply routes">▶ Apply</button>
-                            <button class="btn btn-sm btn-outline-info" onclick="refreshUserRoutes('<?php echo $user['ip']; ?>', <?php echo $index; ?>)" title="Refresh routes">↻</button>
+                            <button class="btn btn-sm btn-outline-primary" 
+                                    data-peer-ip="<?php echo sanitizeOutput($user['ip']); ?>" 
+                                    data-username="<?php echo sanitizeOutput($user['client']); ?>"
+                                    onclick="openAddRouteModal(this)" title="Add route">+ Add Route</button>
+                            <button class="btn btn-sm btn-outline-secondary" 
+                                    data-peer-ip="<?php echo sanitizeOutput($user['ip']); ?>" 
+                                    data-row-index="<?php echo (int)$index; ?>"
+                                    onclick="applyRoutes(this)" title="Apply routes">▶ Apply</button>
+                            <button class="btn btn-sm btn-outline-info" 
+                                    data-peer-ip="<?php echo sanitizeOutput($user['ip']); ?>" 
+                                    data-row-index="<?php echo (int)$index; ?>"
+                                    onclick="refreshUserRoutes(this)" title="Refresh routes">↻</button>
                         </div>
                     </td>
                     <td>
                         <div class="user-actions">
-                            <button class="btn btn-danger btn-sm" onclick="confirmDelete(<?php echo $index; ?>)" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete User</button>
+                            <button class="btn btn-danger btn-sm" 
+                                    data-user-index="<?php echo (int)$index; ?>" 
+                                    onclick="confirmDelete(this)" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#confirmDeleteModal">Delete User</button>
                         </div>
                     </td>
                 </tr>
@@ -765,8 +1073,8 @@ $allRoutes = getPeerRoutes();
                                 <select class="form-control" id="routePeerIp" name="peerIp" required>
                                     <option value="">Select a user</option>
                                     <?php foreach ($users as $user): ?>
-                                        <option value="<?php echo htmlspecialchars($user['ip']); ?>">
-                                            <?php echo htmlspecialchars($user['client'] . ' (' . $user['ip'] . ')'); ?>
+                                        <option value="<?php echo sanitizeOutput($user['ip']); ?>">
+                                            <?php echo sanitizeOutput($user['client'] . ' (' . $user['ip'] . ')'); ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
@@ -785,7 +1093,7 @@ $allRoutes = getPeerRoutes();
                     <div class="col-md-6">
                         <h5>Current Routes</h5>
                         <div class="routes-list-container" style="max-height: 300px; overflow-y: auto;">
-                            <pre id="routesList"><?php echo htmlspecialchars($allRoutes); ?></pre>
+                            <pre id="routesList"><?php echo sanitizeOutput($allRoutes); ?></pre>
                         </div>
                         <div class="mt-3">
                             <button class="btn btn-secondary" onclick="refreshRoutes()">Refresh Routes</button>
@@ -859,12 +1167,16 @@ $allRoutes = getPeerRoutes();
             <div class="modal-body">
                 <form id="changePasswordForm">
                     <div class="mb-3">
+                        <label for="oldPassword" class="form-label">Current Password</label>
+                        <input type="password" class="form-control" id="oldPassword" name="oldPassword" required placeholder="Enter current password" autocomplete="current-password">
+                    </div>
+                    <div class="mb-3">
                         <label for="newPassword" class="form-label">New Password</label>
-                        <input type="password" class="form-control" id="newPassword" name="newPassword" required placeholder="Enter new password">
+                        <input type="password" class="form-control" id="newPassword" name="newPassword" required placeholder="Enter new password" autocomplete="new-password" minlength="8" maxlength="128">
                     </div>
                     <div class="mb-3">
                         <label for="confirmPassword" class="form-label">Confirm Password</label>
-                        <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" required placeholder="Confirm new password">
+                        <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" required placeholder="Confirm new password" autocomplete="new-password" minlength="8" maxlength="128">
                     </div>
                     <button type="submit" class="btn btn-primary w-100">Change Password</button>
                 </form>
@@ -1037,6 +1349,7 @@ $allRoutes = getPeerRoutes();
                 formData.append('ipRangeFrom', ipRangeFrom);
                 formData.append('ipRangeTo', ipRangeTo);
             }
+            formData.append('csrf_token', getCSRFToken());
 
             // Show loading indicator
             const originalButtonText = addMultipleUsersButton.textContent;
@@ -1152,8 +1465,16 @@ $allRoutes = getPeerRoutes();
     if (changePasswordForm) {
         changePasswordForm.addEventListener('submit', function(event) {
             event.preventDefault();
+            const oldPassword = document.getElementById('oldPassword').value;
             const newPassword = document.getElementById('newPassword').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (!oldPassword) {
+                document.getElementById('errorMessage').textContent = 'Current password is required';
+                document.getElementById('errorModal').classList.add('show');
+                document.getElementById('errorModal').style.display = 'block';
+                return;
+            }
 
             if (newPassword !== confirmPassword) {
                 document.getElementById('errorMessage').textContent = 'Passwords do not match';
@@ -1164,7 +1485,10 @@ $allRoutes = getPeerRoutes();
 
             const formData = new FormData();
             formData.append('changePassword', '1');
+            formData.append('oldPassword', document.getElementById('oldPassword').value);
             formData.append('newPassword', newPassword);
+            formData.append('confirmPassword', confirmPassword);
+            formData.append('csrf_token', getCSRFToken());
 
             fetch('', {
                 method: 'POST',
@@ -1213,6 +1537,7 @@ $allRoutes = getPeerRoutes();
             formData.append('peerIp', peerIp);
             formData.append('destination', destination);
             if (gateway) formData.append('gateway', gateway);
+            formData.append('csrf_token', getCSRFToken());
 
             // Show loading indicator
             const submitButton = document.querySelector('#addRouteForm button[type="submit"]');
@@ -1273,12 +1598,13 @@ $allRoutes = getPeerRoutes();
             return;
         }
         
+        const formData = new FormData();
+        formData.append('listRoutes', '1');
+        formData.append('csrf_token', getCSRFToken());
+        
         fetch('', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: 'listRoutes=1'
+            body: formData
         }).then(response => response.text())
             .then(data => {
                 document.getElementById('routesList').textContent = data;
@@ -1293,6 +1619,7 @@ $allRoutes = getPeerRoutes();
         const formData = new FormData();
         formData.append('applyRoutes', '1');
         formData.append('peerIp', 'all');
+        formData.append('csrf_token', getCSRFToken());
 
         fetch('', {
             method: 'POST',
@@ -1337,12 +1664,21 @@ $allRoutes = getPeerRoutes();
     }
     
     // Function to delete a specific route
-    function deleteRoute(peerIp, route, rowIndex) {
+    function deleteRoute(button) {
+        const peerIp = button.getAttribute('data-peer-ip');
+        const route = button.getAttribute('data-route');
+        const rowIndex = button.getAttribute('data-row-index');
+        
+        if (!peerIp || !route || rowIndex === null) {
+            alert('Error: Missing route information');
+            return;
+        }
+        
         // Extract destination from route (first part before space)
         const destination = route.split(' ')[0];
         
         // Check if confirmation is needed
-        if (!confirm('Are you sure you want to delete this route?\n' + destination)) {
+        if (!confirm('Are you sure you want to delete this route?\n' + escapeHtml(destination))) {
             return;
         }
         
@@ -1350,6 +1686,7 @@ $allRoutes = getPeerRoutes();
         formData.append('deleteRoute', '1');
         formData.append('peerIp', peerIp);
         formData.append('destination', destination);
+        formData.append('csrf_token', getCSRFToken());
         
         // Check if routes content element exists
         const contentElement = document.getElementById('routes-content-' + rowIndex);
@@ -1370,7 +1707,7 @@ $allRoutes = getPeerRoutes();
             .then(data => {
                 if (data.returnCode === 0) {
                     // Refresh the routes display
-                    refreshUserRoutes(peerIp, rowIndex);
+                    refreshUserRoutesByButton(button);
                     // Also refresh the routes modal if it's open
                     refreshRoutes();
                     
@@ -1386,7 +1723,7 @@ $allRoutes = getPeerRoutes();
                     }, 3000);
                 } else {
                     contentElement.innerHTML = originalContent;
-                    alert('Error deleting route: ' + data.output);
+                    alert('Error deleting route: ' + escapeHtml(data.output || 'Unknown error'));
                 }
             })
             .catch(error => {
@@ -1397,7 +1734,15 @@ $allRoutes = getPeerRoutes();
     }
     
     // Function to apply routes for a specific user
-    function applyRoutes(peerIp, rowIndex) {
+    function applyRoutes(button) {
+        const peerIp = button.getAttribute('data-peer-ip');
+        const rowIndex = button.getAttribute('data-row-index');
+        
+        if (!peerIp || rowIndex === null) {
+            alert('Error: Missing route information');
+            return;
+        }
+        
         const contentElement = document.getElementById('routes-content-' + rowIndex);
         if (!contentElement) {
             console.error('Routes content element not found for row index:', rowIndex);
@@ -1411,6 +1756,7 @@ $allRoutes = getPeerRoutes();
         const formData = new FormData();
         formData.append('applyRoutes', '1');
         formData.append('peerIp', peerIp);
+        formData.append('csrf_token', getCSRFToken());
         
         fetch('', {
             method: 'POST',
@@ -1431,7 +1777,7 @@ $allRoutes = getPeerRoutes();
                     }, 3000);
                 } else {
                     contentElement.innerHTML = originalContent;
-                    alert('Error applying routes: ' + data.output);
+                    alert('Error applying routes: ' + escapeHtml(data.output || 'Unknown error'));
                 }
             })
             .catch(error => {
@@ -1439,6 +1785,15 @@ $allRoutes = getPeerRoutes();
                 contentElement.innerHTML = originalContent;
                 alert('Error applying routes');
             });
+    }
+    
+    // Function to refresh routes for a specific user (by button)
+    function refreshUserRoutesByButton(button) {
+        const peerIp = button.getAttribute('data-peer-ip');
+        const rowIndex = button.getAttribute('data-row-index');
+        if (peerIp && rowIndex !== null) {
+            refreshUserRoutes(peerIp, rowIndex);
+        }
     }
     
     // Function to refresh routes for a specific user
@@ -1455,6 +1810,7 @@ $allRoutes = getPeerRoutes();
         const formData = new FormData();
         formData.append('getUserRoutesArray', '1');
         formData.append('peerIp', peerIp);
+        formData.append('csrf_token', getCSRFToken());
         
         fetch('', {
             method: 'POST',
@@ -1463,10 +1819,16 @@ $allRoutes = getPeerRoutes();
             .then(data => {
                 if (data.routes && Array.isArray(data.routes) && data.routes.length > 0) {
                     let html = '';
+                    const escapedPeerIp = escapeHtml(peerIp);
                     for (const route of data.routes) {
+                        const escapedRoute = escapeHtml(route);
                         html += `<div class="route-item">
-                                    <span class="route-text">${route}</span>
-                                    <button class="btn btn-danger btn-sm route-delete-btn" onclick="deleteRoute('${peerIp}', '${route.replace(/'/g, "\\'")}', ${rowIndex})" title="Delete route">×</button>
+                                    <span class="route-text">${escapedRoute}</span>
+                                    <button class="btn btn-danger btn-sm route-delete-btn" 
+                                            data-peer-ip="${escapedPeerIp}" 
+                                            data-route="${escapedRoute}" 
+                                            data-row-index="${rowIndex}"
+                                            onclick="deleteRoute(this)" title="Delete route">×</button>
                                  </div>`;
                     }
                     contentElement.innerHTML = html;
@@ -1491,6 +1853,7 @@ $allRoutes = getPeerRoutes();
         // Get updated routes for all users
         const formData = new FormData();
         formData.append('getAllUsersRoutesArray', '1');
+        formData.append('csrf_token', getCSRFToken());
         
         fetch('', {
             method: 'POST',

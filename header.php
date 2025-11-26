@@ -1,4 +1,10 @@
 <?php
+// Include security functions
+require_once __DIR__ . '/security.php';
+
+// Configure secure session
+secureSession();
+
 // Define default config values
 $defaultConfig = [
     'chap_secrets_path' => '/etc/ppp/chap-secrets',
