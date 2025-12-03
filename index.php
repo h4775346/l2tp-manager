@@ -1186,6 +1186,12 @@ $allRoutes = getPeerRoutes();
 </div>
 
 <script>
+    // Retrieve CSRF token from hidden input on the page
+    function getCSRFToken() {
+        const tokenInput = document.querySelector('input[name="csrf_token"]');
+        return tokenInput ? tokenInput.value : '';
+    }
+
     // Handle user form submission
     const addUserForm = document.getElementById('addUserForm');
     const addUserButton = document.getElementById('addUserButton');
