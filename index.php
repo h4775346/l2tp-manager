@@ -1243,6 +1243,7 @@ $allRoutes = getPeerRoutes();
             formData.append('server', server);
             formData.append('secret', secret);
             if (ip) formData.append('ip', ip);
+            formData.append('csrf_token', getCSRFToken());
 
             // Show loading indicator
             const originalButtonText = addUserButton.textContent;
@@ -1398,6 +1399,7 @@ $allRoutes = getPeerRoutes();
             const formData = new FormData();
             formData.append('delete', '1');
             formData.append('index', index);
+            formData.append('csrf_token', getCSRFToken());
 
             fetch('', {
                 method: 'POST',
@@ -1446,6 +1448,7 @@ $allRoutes = getPeerRoutes();
             const formData = new FormData();
             formData.append('delete', '1');
             formData.append('index', index);
+            formData.append('csrf_token', getCSRFToken());
 
             fetch('', {
                 method: 'POST',
