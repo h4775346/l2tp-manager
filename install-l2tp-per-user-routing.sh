@@ -1,6 +1,14 @@
-# Create the l2tp-routectl CLI tool
-echo -e "${YELLOW}Creating l2tp-routectl CLI tool...${NC}"
-sudo tee /usr/local/sbin/l2tp-routectl > /dev/null << 'EOF'
+# Create or update the l2tp-routectl CLI tool
+TARGET_CLI="/usr/local/sbin/l2tp-routectl"
+
+if [ -f "$TARGET_CLI" ]; then
+    echo -e "${YELLOW}l2tp-routectl already exists at $TARGET_CLI${NC}"
+    echo -e "${YELLOW}Updating existing l2tp-routectl CLI tool...${NC}"
+else
+    echo -e "${YELLOW}Creating l2tp-routectl CLI tool...${NC}"
+fi
+
+sudo tee "$TARGET_CLI" > /dev/null << 'EOF'
 #!/bin/bash
 
 # l2tp-routectl - CLI tool for managing per-user routes
@@ -527,4 +535,4 @@ esac
 EOF
 
 # Make the CLI tool executable
-sudo chmod +x /usr/local/sbin/l2tp-routectl
+sudo chmod +x "$TARGET_CLI"
