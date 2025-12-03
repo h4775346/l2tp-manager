@@ -4,9 +4,27 @@
  * Provides input validation, CSRF protection, and security utilities
  */
 
-// Start session if not already started
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+/**
+ * Ensure session is started with secure cookie parameters
+ * This must be called before any output is sent
+ */
+function ensureSessionStarted() {
+    if (session_status() === PHP_SESSION_NONE) {
+        // Set secure session cookie parameters before starting the session
+        if (ini_get('session.use_cookies')) {
+            $params = session_get_cookie_params();
+            session_set_cookie_params([
+                'lifetime' => $params['lifetime'],
+                'path'     => $params['path'],
+                'domain'   => $params['domain'],
+                'secure'   => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
+                'httponly' => true,
+                'samesite' => 'Strict'
+            ]);
+        }
+
+        session_start();
+    }
 }
 
 /**
@@ -188,6 +206,9 @@ function regenerateCSRFToken() {
  * Configure secure session settings
  */
 function secureSession() {
+    // Ensure the session is started with secure settings
+    ensureSessionStarted();
+
     // Regenerate session ID periodically to prevent session fixation
     if (!isset($_SESSION['created'])) {
         $_SESSION['created'] = time();
