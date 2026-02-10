@@ -5,6 +5,34 @@
  */
 
 /**
+ * Enforce HTTPS connection (optional - call at start of pages if needed)
+ * @param bool $enforce Whether to enforce HTTPS redirect
+ */
+function enforceHTTPS($enforce = false) {
+    if ($enforce && empty($_SERVER['HTTPS']) && $_SERVER['HTTP_HOST'] !== 'localhost' && $_SERVER['REMOTE_ADDR'] !== '127.0.0.1') {
+        $redirectUrl = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+        header('Location: ' . $redirectUrl, true, 301);
+        exit();
+    }
+}
+
+/**
+ * Set security headers
+ */
+function setSecurityHeaders() {
+    // Prevent clickjacking
+    header('X-Frame-Options: SAMEORIGIN');
+    // Prevent MIME type sniffing
+    header('X-Content-Type-Options: nosniff');
+    // Enable XSS filter
+    header('X-XSS-Protection: 1; mode=block');
+    // Referrer policy
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    // Content Security Policy (adjust as needed)
+    header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data:; font-src 'self' https://cdnjs.cloudflare.com;");
+}
+
+/**
  * Ensure session is started with secure cookie parameters
  * This must be called before any output is sent
  */
@@ -409,5 +437,57 @@ function validateGateway($gateway) {
         return true; // Gateway is optional
     }
     return validateIP($gateway);
+}
+
+/**
+ * Audit log for tracking user actions
+ * @param string $action The action performed (e.g., 'user_add', 'user_delete', 'route_add')
+ * @param array $details Additional details about the action
+ */
+function auditLog($action, $details = []) {
+    $logFile = '/var/log/l2tp-manager-audit.log';
+    $timestamp = date('Y-m-d H:i:s');
+    $clientIP = getClientIP();
+    $username = $_SESSION['admin_user'] ?? 'unknown';
+    
+    $logEntry = [
+        'timestamp' => $timestamp,
+        'ip' => $clientIP,
+        'user' => $username,
+        'action' => $action,
+        'details' => $details
+    ];
+    
+    $logLine = json_encode($logEntry) . "\n";
+    
+    // Try to write to log file, silently fail if not writable
+    @file_put_contents($logFile, $logLine, FILE_APPEND | LOCK_EX);
+}
+
+/**
+ * Check if password meets strength requirements
+ * @param string $password Password to check
+ * @return array ['valid' => bool, 'errors' => array]
+ */
+function checkPasswordStrength($password) {
+    $errors = [];
+    
+    if (strlen($password) < 8) {
+        $errors[] = 'Password must be at least 8 characters long';
+    }
+    if (!preg_match('/[A-Z]/', $password)) {
+        $errors[] = 'Password must contain at least one uppercase letter';
+    }
+    if (!preg_match('/[a-z]/', $password)) {
+        $errors[] = 'Password must contain at least one lowercase letter';
+    }
+    if (!preg_match('/[0-9]/', $password)) {
+        $errors[] = 'Password must contain at least one number';
+    }
+    
+    return [
+        'valid' => empty($errors),
+        'errors' => $errors
+    ];
 }
 

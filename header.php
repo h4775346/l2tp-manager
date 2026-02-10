@@ -2,6 +2,9 @@
 // Include security functions
 require_once __DIR__ . '/security.php';
 
+// Set security headers
+setSecurityHeaders();
+
 // Configure secure session
 secureSession();
 

@@ -1,14 +1,40 @@
 <?php
 include 'header.php';
 
+/**
+ * Check if request is AJAX/API request
+ */
+function isAjaxRequest() {
+    return (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && 
+            strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') ||
+           (!empty($_POST)) ||
+           (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false);
+}
+
+/**
+ * Return JSON error response for AJAX requests
+ */
+function jsonError($message, $code = 401) {
+    http_response_code($code);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => $message, 'code' => $code]);
+    exit();
+}
+
 // Check session timeout
 if (!checkSessionTimeout()) {
     session_destroy();
+    if (isAjaxRequest()) {
+        jsonError('Session expired. Please refresh the page and login again.');
+    }
     header('Location: login.php?expired=1');
     exit();
 }
 
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+    if (isAjaxRequest()) {
+        jsonError('Not authenticated. Please login.');
+    }
     header('Location: login.php');
     exit();
 }
@@ -885,9 +911,32 @@ $allRoutes = getPeerRoutes();
 </nav>
 <div class="container mt-5">
 
-
     <h2 class="mb-4 text-center">Manage L2TP Users</h2>
-     <div class="table-responsive">
+    
+    <!-- Search and Export Bar -->
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-search">🔍</i></span>
+                <input type="text" class="form-control" id="userSearch" placeholder="Search users by username, IP, or password..." onkeyup="filterUsers()">
+                <button class="btn btn-outline-secondary" type="button" onclick="clearSearch()">Clear</button>
+            </div>
+        </div>
+        <div class="col-md-6 text-end">
+            <span class="text-muted me-3">Total: <strong id="userCount"><?php echo count($users); ?></strong> users</span>
+            <button class="btn btn-outline-success" onclick="exportUsers()">📥 Export CSV</button>
+            <button class="btn btn-outline-info" onclick="toggleShowPasswords()">👁️ Toggle Passwords</button>
+        </div>
+    </div>
+    
+    <!-- Pagination Info -->
+    <div class="row mb-2">
+        <div class="col-12">
+            <small class="text-muted">Showing <span id="showingCount"><?php echo count($users); ?></span> of <?php echo count($users); ?> users</small>
+        </div>
+    </div>
+    
+    <div class="table-responsive">
         <table class="table table-hover table-bordered text-center">
             <thead class="table-dark">
             <tr>
@@ -1900,6 +1949,90 @@ $allRoutes = getPeerRoutes();
                 });
             });
     }
+
+    // ==================== Search & Filter ====================
+    function filterUsers() {
+        const searchTerm = document.getElementById('userSearch').value.toLowerCase();
+        const rows = document.querySelectorAll('#userTable tr');
+        let visibleCount = 0;
+        
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            if (text.includes(searchTerm)) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        
+        document.getElementById('showingCount').textContent = visibleCount;
+    }
+    
+    function clearSearch() {
+        document.getElementById('userSearch').value = '';
+        filterUsers();
+    }
+    
+    // ==================== Export Users ====================
+    function exportUsers() {
+        const rows = document.querySelectorAll('#userTable tr:not([style*="display: none"])');
+        let csv = 'Username,Server,Password,IP Address\n';
+        
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 4) {
+                const username = cells[0].textContent.trim();
+                const server = cells[1].textContent.trim();
+                const password = cells[2].textContent.trim();
+                const ip = cells[3].textContent.trim();
+                csv += `"${username}","${server}","${password}","${ip}"\n`;
+            }
+        });
+        
+        // Download CSV
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'l2tp-users-' + new Date().toISOString().slice(0, 10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    }
+    
+    // ==================== Toggle Passwords ====================
+    let passwordsHidden = false;
+    function toggleShowPasswords() {
+        const rows = document.querySelectorAll('#userTable tr');
+        passwordsHidden = !passwordsHidden;
+        
+        rows.forEach(row => {
+            const passwordCell = row.querySelectorAll('td')[2];
+            if (passwordCell) {
+                if (passwordsHidden) {
+                    if (!passwordCell.dataset.original) {
+                        passwordCell.dataset.original = passwordCell.textContent;
+                    }
+                    passwordCell.textContent = '••••••••';
+                } else {
+                    if (passwordCell.dataset.original) {
+                        passwordCell.textContent = passwordCell.dataset.original;
+                    }
+                }
+            }
+        });
+    }
+    
+    // ==================== Confirmation Dialog Enhancement ====================
+    // Add keyboard shortcut for search
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+            e.preventDefault();
+            document.getElementById('userSearch').focus();
+        }
+    });
 </script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
