@@ -120,14 +120,19 @@ function validateUsername($username) {
         return false;
     }
     
-    // Length check (1-32 characters)
-    if (strlen($username) < 1 || strlen($username) > 32) {
+    // Length check (1-64 characters)
+    if (strlen($username) < 1 || strlen($username) > 64) {
         return false;
     }
     
-    // Allow alphanumeric, underscore, and hyphen
-    // Must start with alphanumeric
-    if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/', $username)) {
+    // Allow alphanumeric, underscore, hyphen, dot, and @ (common in L2TP/PPP usernames)
+    // Reject dangerous characters: spaces, quotes, backticks, semicolons, pipes, etc.
+    if (preg_match('/[\s\'"`;\|\\\\$()<>{}]/', $username)) {
+        return false;
+    }
+    
+    // Must contain at least one alphanumeric character
+    if (!preg_match('/[a-zA-Z0-9]/', $username)) {
         return false;
     }
     
@@ -144,13 +149,18 @@ function validatePassword($password) {
         return false;
     }
     
-    // Length check (minimum 8, maximum 128 characters)
-    if (strlen($password) < 8 || strlen($password) > 128) {
+    // Length check (minimum 1, maximum 128 characters) - L2TP passwords can be short
+    if (strlen($password) < 1 || strlen($password) > 128) {
         return false;
     }
     
     // Check for null bytes (prevent null byte injection)
     if (strpos($password, "\0") !== false) {
+        return false;
+    }
+    
+    // Reject dangerous shell characters
+    if (preg_match('/[\'"`;\|\\\\$()<>{}]/', $password)) {
         return false;
     }
     
