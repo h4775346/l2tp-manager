@@ -54,7 +54,7 @@ function readUsers($file) {
         $parts = preg_split('/\s+/', $line);
         if (count($parts) == 4) {
             $users[] = [
-                'client' => $parts[0],
+                'client' => trim($parts[0], '"'),
                 'server' => $parts[1],
                 'secret' => $parts[2],
                 'ip' => $parts[3]
@@ -78,7 +78,11 @@ function writeUsers($file, $users) {
     $content .= "tunnel tunnel tunnel *\n";
     foreach ($users as $user) {
         // Sanitize user data before writing
-        $client = preg_replace('/[^a-zA-Z0-9_-]/', '', $user['client']);
+        // Allow special chars like @ and . in usernames; quote if needed
+        $client = $user['client'];
+        if (preg_match('/[@.\-]/', $client) && strpos($client, '@') !== false) {
+            $client = '"' . $client . '"';
+        }
         $server = preg_replace('/[^*a-zA-Z0-9_-]/', '', $user['server']);
         $secret = preg_replace('/[\x00-\x1F\x7F]/', '', $user['secret']); // Remove control characters
         $ip = preg_replace('/[^0-9.*]/', '', $user['ip']);
@@ -91,6 +95,39 @@ function writeUsers($file, $users) {
         $content .= "{$client} {$server} {$secret} {$ip}\n";
     }
     file_put_contents($validatedPath, $content);
+}
+
+// Get L2TP service status
+function getServiceStatus() {
+    $output = shell_exec('systemctl is-active xl2tpd 2>&1');
+    $status = trim($output);
+    
+    // Get connected tunnels count
+    $tunnels = shell_exec('ip addr show 2>/dev/null | grep -c ppp || echo 0');
+    $tunnelCount = (int)trim($tunnels);
+    
+    return [
+        'status' => $status,
+        'running' => ($status === 'active'),
+        'tunnels' => $tunnelCount
+    ];
+}
+
+// Control L2TP service (requires sudo permissions for www-data)
+function controlService($action) {
+    $allowed = ['start', 'stop', 'restart'];
+    if (!in_array($action, $allowed)) {
+        return ['success' => false, 'message' => 'Invalid action'];
+    }
+    
+    $output = shell_exec("sudo systemctl $action xl2tpd 2>&1");
+    $status = shell_exec('systemctl is-active xl2tpd 2>&1');
+    
+    return [
+        'success' => (trim($status) === 'active' || $action === 'stop'),
+        'message' => "Service $action completed",
+        'status' => trim($status)
+    ];
 }
 
 // Generate random password
@@ -119,9 +156,23 @@ function getNextIp($users) {
         return '10.255.10.11';
     }
 
-    $lastIp = end($users)['ip'];
-    $lastIpLong = ip2long($lastIp);
-    $nextIpLong = $lastIpLong + 1;
+    // Find the MAXIMUM IP in use, not just the last entry in array
+    // This fixes the bug where out-of-order entries caused IP collisions
+    $maxIpLong = 0;
+    foreach ($users as $user) {
+        $ipLong = ip2long($user['ip']);
+        if ($ipLong !== false && $ipLong > $maxIpLong) {
+            $maxIpLong = $ipLong;
+        }
+    }
+    
+    // Fallback if no valid IPs found
+    if ($maxIpLong === 0) {
+        return '10.255.10.11';
+    }
+
+    $lastIp = long2ip($maxIpLong);
+    $nextIpLong = $maxIpLong + 1;
 
     // Define the current and next range boundaries
     $currentRangeStart = ip2long('10.255.' . explode('.', $lastIp)[2] . '.2');
@@ -390,6 +441,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     // Handle logout
+    // Handle service control
+    if (isset($_POST['serviceAction'])) {
+        header('Content-Type: application/json');
+        $action = $_POST['serviceAction'] ?? '';
+        $result = controlService($action);
+        echo json_encode($result);
+        exit();
+    }
+    
+    // Handle service status request
+    if (isset($_POST['getServiceStatus'])) {
+        header('Content-Type: application/json');
+        echo json_encode(getServiceStatus());
+        exit();
+    }
+    
     if (isset($_POST['logout'])) {
         session_destroy();
         header('Location: login.php');
@@ -912,6 +979,32 @@ $allRoutes = getPeerRoutes();
 <div class="container mt-5">
 
     <h2 class="mb-4 text-center">Manage L2TP Users</h2>
+    
+    <!-- L2TP Service Status -->
+    <div class="card mb-4">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+            <span><strong>🔌 L2TP Service Status</strong></span>
+            <div>
+                <button class="btn btn-sm btn-success" onclick="controlService('start')">▶️ Start</button>
+                <button class="btn btn-sm btn-warning" onclick="controlService('restart')">🔄 Restart</button>
+                <button class="btn btn-sm btn-danger" onclick="controlService('stop')">⏹️ Stop</button>
+                <button class="btn btn-sm btn-secondary" onclick="refreshServiceStatus()">🔃 Refresh</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <strong>Status:</strong> <span id="serviceStatus" class="badge bg-secondary">Loading...</span>
+                </div>
+                <div class="col-md-4">
+                    <strong>Connected Tunnels:</strong> <span id="tunnelCount">-</span>
+                </div>
+                <div class="col-md-4">
+                    <strong>Service:</strong> xl2tpd
+                </div>
+            </div>
+        </div>
+    </div>
     
     <!-- Search and Export Bar -->
     <div class="row mb-3">
@@ -2036,5 +2129,59 @@ $allRoutes = getPeerRoutes();
 </script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+<script>
+// Service control functions
+function refreshServiceStatus() {
+    fetch('index.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'getServiceStatus=1&csrf_token=' + document.querySelector('input[name="csrf_token"]').value
+    })
+    .then(response => response.json())
+    .then(data => {
+        const statusBadge = document.getElementById('serviceStatus');
+        const tunnelCount = document.getElementById('tunnelCount');
+        
+        if (data.running) {
+            statusBadge.className = 'badge bg-success';
+            statusBadge.textContent = 'Running';
+        } else {
+            statusBadge.className = 'badge bg-danger';
+            statusBadge.textContent = data.status || 'Stopped';
+        }
+        tunnelCount.textContent = data.tunnels || 0;
+    })
+    .catch(err => {
+        console.error('Error fetching status:', err);
+    });
+}
+
+function controlService(action) {
+    if (!confirm('Are you sure you want to ' + action + ' the L2TP service?')) {
+        return;
+    }
+    
+    fetch('index.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'serviceAction=' + action + '&csrf_token=' + document.querySelector('input[name="csrf_token"]').value
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert(data.message + ' - Status: ' + data.status);
+        refreshServiceStatus();
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+    });
+}
+
+// Refresh status on page load
+document.addEventListener('DOMContentLoaded', function() {
+    refreshServiceStatus();
+    // Auto-refresh every 30 seconds
+    setInterval(refreshServiceStatus, 30000);
+});
+</script>
 </body>
 </html>

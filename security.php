@@ -41,14 +41,21 @@ function ensureSessionStarted() {
         // Set secure session cookie parameters before starting the session
         if (ini_get('session.use_cookies')) {
             $params = session_get_cookie_params();
-            session_set_cookie_params([
-                'lifetime' => $params['lifetime'],
-                'path'     => $params['path'],
-                'domain'   => $params['domain'],
-                'secure'   => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
-                'httponly' => true,
-                'samesite' => 'Strict'
-            ]);
+            session_set_cookie_params(
+                $params["lifetime"],
+                $params["path"] . "; samesite=Strict",
+                $params["domain"],
+                isset($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] === "on",
+                true
+            );
+
+
+
+
+
+
+
+
         }
 
         session_start();
@@ -255,19 +262,19 @@ function secureSession() {
         session_regenerate_id(true);
         $_SESSION['created'] = time();
     }
-    
-    // Set secure session cookie parameters
-    if (ini_get('session.use_cookies')) {
-        $params = session_get_cookie_params();
-        session_set_cookie_params([
-            'lifetime' => $params['lifetime'],
-            'path' => $params['path'],
-            'domain' => $params['domain'],
-            'secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
-            'httponly' => true,
-            'samesite' => 'Strict'
-        ]);
-    }
+    // PHP 7.2 compat:     
+    // PHP 7.2 compat:     // Set secure session cookie parameters
+    // PHP 7.2 compat:     if (ini_get('session.use_cookies')) {
+    // PHP 7.2 compat:         $params = session_get_cookie_params();
+    // PHP 7.2 compat:         session_set_cookie_params([
+    // PHP 7.2 compat:             'lifetime' => $params['lifetime'],
+    // PHP 7.2 compat:             'path' => $params['path'],
+    // PHP 7.2 compat:             'domain' => $params['domain'],
+    // PHP 7.2 compat:             'secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
+    // PHP 7.2 compat:             'httponly' => true,
+    // PHP 7.2 compat:             'samesite' => 'Strict'
+    // PHP 7.2 compat:         ]);
+    // PHP 7.2 compat:     }
 }
 
 /**
