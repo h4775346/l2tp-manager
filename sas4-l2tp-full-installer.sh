@@ -4,6 +4,10 @@
 # 🚀 SAS4 L2TP/IPSec Server - Full Installation Script
 # ==============================================================================
 
+# Fail fast: stop on any error, unset variable, or failed pipe stage so a
+# partial install can never masquerade as a successful one.
+set -euo pipefail
+
 # Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -12,6 +16,15 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# Report the line that failed instead of dying silently.
+trap 'echo -e "${RED}❌ Installation FAILED at line $LINENO. The server may be half-configured — re-run this script after fixing the error above.${NC}" >&2' ERR
+
+# Require root (the script uses sudo throughout, but bail early if sudo is missing).
+if [[ $EUID -ne 0 ]] && ! sudo -n true 2>/dev/null; then
+    echo -e "${RED}This script needs root. Run with: sudo $0${NC}" >&2
+    exit 1
+fi
 
 # Artwork
 echo -e "${CYAN}"
@@ -41,13 +54,35 @@ echo -e "${YELLOW}⚠️  WARNING: This will remove all existing L2TP configurat
 echo -e "${YELLOW}   Please backup any important data before proceeding!${NC}"
 echo ""
 
+# ---------------------------------------------------------------------------
+# Detect the WAN/uplink interface instead of assuming eth0. On modern Ubuntu
+# the NIC is often ens3/enp1s0/etc, and a hardcoded eth0 silently breaks NAT
+# (clients connect but get no internet).
+# ---------------------------------------------------------------------------
+WAN_IF="$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'dev \K\S+' | head -1 || true)"
+if [[ -z "$WAN_IF" ]]; then
+    WAN_IF="$(ip -o -4 route show to default 2>/dev/null | awk '{print $5}' | head -1 || true)"
+fi
+if [[ -z "$WAN_IF" ]]; then
+    echo -e "${RED}Could not auto-detect the uplink interface. Set it manually with WAN_IF=<iface> before running.${NC}" >&2
+    exit 1
+fi
+echo -e "${CYAN}🌐 Detected uplink interface: ${GREEN}${WAN_IF}${NC}"
+
+# IPsec pre-shared key. Override with: L2TP_PSK="yourkey" sudo -E bash installer.sh
+# NOTE: the historical default is "123456" — every public install shares it, so
+# clients keep working but anyone can guess it. Set L2TP_PSK in production.
+PSK="${L2TP_PSK:-123456}"
+echo ""
+
 # Update the system
 echo -e "${CYAN}🔄 Updating system packages...${NC}"
 sudo apt update -y
 
-# Install required packages
+# Install required packages (iptables-persistent makes firewall rules survive reboot)
 echo -e "${CYAN}📦 Installing L2TP/IPSec packages...${NC}"
-sudo apt install strongswan xl2tpd -y
+export DEBIAN_FRONTEND=noninteractive
+sudo -E apt install -y strongswan xl2tpd iptables-persistent
 
 echo -e "${GREEN}✅ Required packages installed${NC}"
 echo ""
@@ -83,9 +118,13 @@ echo ""
 
 # Configure IPsec secrets
 echo -e "${CYAN}🔑 Configuring IPsec secrets...${NC}"
-sudo bash -c 'cat > /etc/ipsec.secrets <<EOF
-: PSK "123456"
-EOF'
+sudo bash -c "cat > /etc/ipsec.secrets <<EOF
+: PSK \"${PSK}\"
+EOF"
+sudo chmod 600 /etc/ipsec.secrets
+if [[ "$PSK" == "123456" ]]; then
+    echo -e "${YELLOW}⚠️  Using the default IPsec PSK '123456'. Set L2TP_PSK to a strong value in production.${NC}"
+fi
 
 echo -e "${GREEN}✅ IPsec secrets configured${NC}"
 echo ""
@@ -107,6 +146,14 @@ ppp debug = yes
 pppoptfile = /etc/ppp/options.xl2tpd
 length bit = yes
 EOF'
+
+# Verify the LNS section actually landed — the package default is an all-commented
+# sample with no [lns default], which makes xl2tpd reject every tunnel with
+# "No Authorization". Fail loudly here rather than ship a dead server.
+if ! grep -q '^\[lns default\]' /etc/xl2tpd/xl2tpd.conf; then
+    echo -e "${RED}xl2tpd.conf is missing the [lns default] section — refusing to continue.${NC}" >&2
+    exit 1
+fi
 
 echo -e "${GREEN}✅ xl2tpd configured${NC}"
 echo ""
@@ -130,9 +177,13 @@ EOF'
 echo -e "${GREEN}✅ PPP options configured${NC}"
 echo ""
 
-# Configure chap-secrets
+# Configure chap-secrets (preserve existing users on re-run — the l2tp-manager
+# panel writes real users here; clobbering would log everyone out).
 echo -e "${CYAN}🔑 Configuring default users...${NC}"
-sudo bash -c 'cat > /etc/ppp/chap-secrets <<EOF
+if [[ -f /etc/ppp/chap-secrets ]] && grep -qvE '^\s*#|^\s*$' /etc/ppp/chap-secrets 2>/dev/null; then
+    echo -e "${YELLOW}↪ Existing chap-secrets found with users — keeping it untouched.${NC}"
+else
+    sudo bash -c 'cat > /etc/ppp/chap-secrets <<EOF
 # Secrets for authentication using CHAP
 # client    server    secret    IP addresses
 user1       *         ikasgfiuasgf  10.255.10.11
@@ -143,39 +194,68 @@ user5       *         vwehyaevwgfw  10.255.10.15
 user6       *         bwrvwefbtbwf  10.255.10.16
 user7       *         wlihfqbeuihf  10.255.10.17
 EOF'
+    sudo chmod 600 /etc/ppp/chap-secrets
+fi
 
 echo -e "${GREEN}✅ Default users configured${NC}"
 echo ""
 
-# Enable IP forwarding
+# Enable IP forwarding (drop-in guarantees it regardless of how sysctl.conf is
+# formatted, and persists across reboots).
 echo -e "${CYAN}🌐 Enabling IP forwarding...${NC}"
-sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
-sudo sysctl -p
+sudo bash -c 'echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-l2tp-forward.conf'
+sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
 echo -e "${GREEN}✅ IP forwarding enabled${NC}"
 echo ""
 
-# Configure firewall rules
+# Configure firewall rules (idempotent: -C checks before -A so re-runs don't
+# stack duplicate rules).
 echo -e "${CYAN}🔥 Configuring firewall rules...${NC}"
-sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-sudo iptables -A FORWARD -p tcp --syn -s 10.255.0.0/16 -j TCPMSS --set-mss 1356
-sudo sh -c "iptables-save > /etc/iptables.rules"
+sudo iptables -t nat -C POSTROUTING -o "$WAN_IF" -j MASQUERADE 2>/dev/null || \
+    sudo iptables -t nat -A POSTROUTING -o "$WAN_IF" -j MASQUERADE
+sudo iptables -C FORWARD -p tcp --syn -s 10.255.0.0/16 -j TCPMSS --set-mss 1356 2>/dev/null || \
+    sudo iptables -A FORWARD -p tcp --syn -s 10.255.0.0/16 -j TCPMSS --set-mss 1356
 
-echo -e "${GREEN}✅ Firewall rules configured${NC}"
+# Persist for reboot via netfilter-persistent (installed above). Also keep the
+# legacy path for compatibility with anything that reads /etc/iptables.rules.
+sudo mkdir -p /etc/iptables
+sudo sh -c "iptables-save > /etc/iptables/rules.v4"
+sudo sh -c "iptables-save > /etc/iptables.rules"
+sudo netfilter-persistent save 2>/dev/null || true
+
+echo -e "${GREEN}✅ Firewall rules configured (uplink: ${WAN_IF}, persisted for reboot)${NC}"
 echo ""
 
-# Restart services
+# Restart services. strongSwan's unit is "strongswan-starter" on Ubuntu 18.04
+# and "strongswan" on some builds — restart whichever exists.
 echo -e "${CYAN}🔄 Restarting L2TP services...${NC}"
-sudo systemctl restart strongswan
+if systemctl list-unit-files | grep -q '^strongswan-starter\.service'; then
+    sudo systemctl restart strongswan-starter
+else
+    sudo systemctl restart strongswan
+fi
+sudo systemctl enable xl2tpd >/dev/null 2>&1 || true
 sudo systemctl restart xl2tpd
 
 echo -e "${GREEN}✅ L2TP services restarted${NC}"
 echo ""
 
-# Verify service status
+# Verify service status (|| true so a non-zero status code doesn't trip set -e)
 echo -e "${CYAN}🔍 Checking service status...${NC}"
-sudo systemctl status strongswan
-sudo systemctl status xl2tpd
+sudo systemctl status xl2tpd --no-pager || true
+
+# Hard verification: xl2tpd must actually be listening on UDP 1701, otherwise
+# the install is broken no matter what the steps above printed.
+echo ""
+echo -e "${CYAN}🔍 Verifying xl2tpd is listening on UDP 1701...${NC}"
+sleep 2
+if sudo ss -lunp 2>/dev/null | grep -q ':1701'; then
+    echo -e "${GREEN}✅ xl2tpd is listening on UDP 1701${NC}"
+else
+    echo -e "${RED}❌ xl2tpd is NOT listening on UDP 1701 — install is incomplete. Check 'journalctl -u xl2tpd'.${NC}" >&2
+    exit 1
+fi
 
 echo ""
 echo -e "${GREEN}==============================================${NC}"
@@ -184,4 +264,12 @@ echo -e "${GREEN}==============================================${NC}"
 echo ""
 
 echo -e "${BLUE}🚀 Now installing Web Management Interface...${NC}"
-curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-install.sh | sudo bash
+TMP_GUI="$(mktemp)"
+if curl -fsSL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-install.sh -o "$TMP_GUI"; then
+    sudo bash "$TMP_GUI"
+    rm -f "$TMP_GUI"
+else
+    rm -f "$TMP_GUI"
+    echo -e "${RED}❌ Failed to download the web interface installer. L2TP server is up; re-run sas4-install.sh later.${NC}" >&2
+    exit 1
+fi

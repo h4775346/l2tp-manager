@@ -1,11 +1,34 @@
 #!/bin/bash
 
+# Stop on first error so a failed sub-installer can't leave a half-built server
+# that still prints "Installation Complete".
+set -euo pipefail
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+trap 'echo -e "${RED}❌ All-in-one install FAILED at line $LINENO. Fix the error above and re-run.${NC}" >&2' ERR
+
+# Download a remote installer to a temp file and run it, failing if the download
+# fails (piping curl straight into bash hides download errors and runs partial
+# scripts when the connection drops mid-transfer).
+run_remote() {
+    local url="$1" tmp
+    tmp="$(mktemp)"
+    if ! curl -fsSL "$url" -o "$tmp"; then
+        rm -f "$tmp"
+        echo -e "${RED}Failed to download: $url${NC}" >&2
+        return 1
+    fi
+    bash "$tmp"
+    local rc=$?
+    rm -f "$tmp"
+    return $rc
+}
 
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}   L2TP Manager - All-in-One Installer${NC}"
@@ -23,23 +46,24 @@ fi
 
 echo -e "${YELLOW}Starting all-in-one installation...${NC}"
 
-# Download and execute the L2TP server installation script
-echo -e "${YELLOW}Installing L2TP server...${NC}"
-curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-l2tp-full-installer.sh | sudo bash
+# Install the L2TP server. NOTE: sas4-l2tp-full-installer.sh already installs the
+# web management interface at its end, so we don't call sas4-install.sh again here.
+echo -e "${YELLOW}Installing L2TP server + web interface...${NC}"
+run_remote https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-l2tp-full-installer.sh
 
-# Download and execute the web management interface installation script
-echo -e "${YELLOW}Installing web management interface...${NC}"
-curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-install.sh | sudo bash
-
-# Download and execute the per-user routing system installation script
+# Install the per-user routing system
 echo -e "${YELLOW}Installing per-user routing system...${NC}"
-curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/install-l2tp-per-user-routing.sh | sudo bash
+run_remote https://raw.githubusercontent.com/h4775346/l2tp-manager/master/install-l2tp-per-user-routing.sh
 
-# Restart services to apply all changes
+# Restart services to apply all changes (handle both strongswan unit names)
 echo -e "${YELLOW}Restarting services...${NC}"
-systemctl restart strongswan
+if systemctl list-unit-files | grep -q '^strongswan-starter\.service'; then
+    systemctl restart strongswan-starter
+else
+    systemctl restart strongswan
+fi
 systemctl restart xl2tpd
-systemctl reload apache2
+systemctl reload apache2 2>/dev/null || true
 
 echo ""
 echo -e "${GREEN}============================================${NC}"
