@@ -70,7 +70,13 @@ echo ""
 
 # Permissions
 echo -e "${CYAN}🔐 Setting up permissions...${NC}"
-chmod 666 $CHAP_SECRETS
+# chap-secrets must be read+writable by the panel (Apache/www-data) and pppd (root).
+# root:www-data 660 — not 666 (world-readable secrets), not 600 (locks out the panel:
+# users vanish from the UI and new users all collide on the same IP).
+if [ -f "$CHAP_SECRETS" ]; then
+    chown root:www-data "$CHAP_SECRETS"
+    chmod 660 "$CHAP_SECRETS"
+fi
 chown -R www-data:www-data $TARGET_DIR
 chmod -R 755 $TARGET_DIR
 

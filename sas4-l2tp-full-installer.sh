@@ -194,8 +194,16 @@ user5       *         vwehyaevwgfw  10.255.10.15
 user6       *         bwrvwefbtbwf  10.255.10.16
 user7       *         wlihfqbeuihf  10.255.10.17
 EOF'
-    sudo chmod 600 /etc/ppp/chap-secrets
 fi
+
+# Ensure the l2tp-manager panel (Apache, runs as www-data) can read AND write
+# chap-secrets. Owner root so pppd reads it; group www-data so the panel does too;
+# mode 660. NOT 600 — that locks out the panel: readUsers() fails so every user
+# vanishes from the UI and every new user collides on 10.255.10.11. NOT world-
+# readable 666 either. Run unconditionally (covers both the preserved and the
+# freshly-created file).
+sudo chown root:www-data /etc/ppp/chap-secrets
+sudo chmod 660 /etc/ppp/chap-secrets
 
 echo -e "${GREEN}✅ Default users configured${NC}"
 echo ""
