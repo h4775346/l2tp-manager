@@ -111,38 +111,47 @@ fi
 echo -e "${CYAN}🔄 Updating system packages...${NC}"
 sudo apt update -y
 
-# Install required packages (iptables-persistent makes NAT rules survive reboot)
+# Install required packages (iptables-persistent makes NAT rules survive reboot).
+# NOTE: no easy-rsa — we build the PKI with plain openssl (see below) because
+# Ubuntu 18.04 ships easy-rsa 2.x, which has no ./easyrsa or make-cadir wrapper.
 echo -e "${CYAN}📦 Installing OpenVPN packages...${NC}"
 export DEBIAN_FRONTEND=noninteractive
-sudo -E apt install -y openvpn easy-rsa iptables-persistent
+sudo -E apt install -y openvpn openssl iptables-persistent
 
 echo -e "${GREEN}✅ Required packages installed${NC}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Build the PKI (server cert only — clients are cert-less). Idempotent: only
-# build if the CA is missing, so re-runs never rebuild and invalidate the
+# Build the PKI (CA + server cert only — clients are cert-less). Done with
+# plain openssl rather than easy-rsa: Ubuntu 18.04 (every SAS box) ships
+# easy-rsa 2.x, which has no ./easyrsa or make-cadir wrapper, so the 3.x flow
+# dies with "./easyrsa: No such file or directory". openssl is always present.
+# Idempotent: only build if the CA is missing, so re-runs never invalidate the
 # running server certificate.
 # ---------------------------------------------------------------------------
-echo -e "${CYAN}🔐 Setting up PKI (server certificate only)...${NC}"
-if [[ ! -f /etc/openvpn/easy-rsa/pki/ca.crt ]]; then
-    # make-cadir ships with the easy-rsa package; fall back to copying the
-    # template if the wrapper isn't on PATH.
-    if command -v make-cadir >/dev/null 2>&1; then
-        make-cadir /etc/openvpn/easy-rsa
-    else
-        rm -rf /etc/openvpn/easy-rsa
-        cp -r /usr/share/easy-rsa /etc/openvpn/easy-rsa
-    fi
-    cd /etc/openvpn/easy-rsa
-    export EASYRSA_BATCH=1 EASYRSA_ALGO=rsa EASYRSA_KEY_SIZE=2048 EASYRSA_REQ_CN="sas-ovpn-ca"
-    ./easyrsa init-pki
-    ./easyrsa build-ca nopass
-    ./easyrsa gen-dh
-    ./easyrsa build-server-full server nopass
-    echo -e "${GREEN}✅ PKI built (CA + server cert + DH)${NC}"
+echo -e "${CYAN}🔐 Setting up PKI (server certificate only, via openssl)...${NC}"
+PKI=/etc/openvpn/pki
+if [[ ! -f "$PKI/ca.crt" ]]; then
+    sudo mkdir -p "$PKI"
+    cd "$PKI"
+    # Certificate Authority
+    sudo openssl genrsa -out ca.key 2048
+    sudo openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 \
+        -subj "/CN=sas-ovpn-ca" -out ca.crt
+    # Server key + cert signed by our CA
+    sudo openssl genrsa -out server.key 2048
+    sudo openssl req -new -key server.key -subj "/CN=server" -out server.csr
+    sudo openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -days 3650 -sha256 -out server.crt
+    sudo rm -f server.csr
+    # Diffie-Hellman params — the slow step (~1-2 min for 2048-bit).
+    echo -e "${YELLOW}   Generating DH params (2048-bit, may take a minute)...${NC}"
+    sudo openssl dhparam -out dh.pem 2048
+    # Private keys root-only; OpenVPN reads them as root before dropping to nobody.
+    sudo chmod 600 ca.key server.key
+    echo -e "${GREEN}✅ PKI built (CA + server cert + DH) in $PKI${NC}"
 else
-    echo -e "${YELLOW}↪ Existing PKI found at /etc/openvpn/easy-rsa/pki — keeping it untouched.${NC}"
+    echo -e "${YELLOW}↪ Existing PKI found at $PKI — keeping it untouched.${NC}"
 fi
 echo ""
 
@@ -158,10 +167,10 @@ proto tcp-server
 dev tun
 topology subnet
 server 10.10.30.0 255.255.255.0
-ca   /etc/openvpn/easy-rsa/pki/ca.crt
-cert /etc/openvpn/easy-rsa/pki/issued/server.crt
-key  /etc/openvpn/easy-rsa/pki/private/server.key
-dh   /etc/openvpn/easy-rsa/pki/dh.pem
+ca   /etc/openvpn/pki/ca.crt
+cert /etc/openvpn/pki/server.crt
+key  /etc/openvpn/pki/server.key
+dh   /etc/openvpn/pki/dh.pem
 cipher AES-256-CBC
 auth SHA1
 keepalive 10 120
