@@ -429,6 +429,34 @@ foreach ($users as &$user) {
 }
 unset($user); // Break the reference
 
+// Load VPN coexistence config (written by sibling installer). Defaults keep
+// backward compatibility: this panel has always been L2TP-only.
+$vpnCfg = @parse_ini_file('/etc/l2tp-manager/vpn.conf') ?: [];
+$vpnCfg += [
+    'SERVER_IP'    => ($_SERVER['SERVER_ADDR'] ?? gethostname()),
+    'COA_PORT'     => '1700',
+    'L2TP_ENABLED' => '1',
+    'L2TP_PSK'     => '123456',
+    'L2TP_RADIUS'  => '10.255.10.10',
+    'OVPN_ENABLED' => '0',
+    'OVPN_PORT'    => '8443',
+    'OVPN_PROTO'   => 'tcp',
+    'OVPN_RADIUS'  => '10.10.30.1',
+];
+
+// Resolve per-router RADIUS shared secrets from the SAS DB (never fatal).
+$nasSecrets = [];
+$ini = @parse_ini_file('/opt/sas4/etc/config.ini');
+if ($ini && function_exists('mysqli_connect')) {
+    $c = @mysqli_connect($ini['db_host'] ?? 'localhost', $ini['db_username'] ?? '', $ini['db_password'] ?? '', $ini['db_name'] ?? '');
+    if ($c) {
+        if ($r = @mysqli_query($c, "SELECT nasname, secret FROM sas_nas")) {
+            while ($row = mysqli_fetch_assoc($r)) { $nasSecrets[$row['nasname']] = $row['secret']; }
+        }
+        @mysqli_close($c);
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // CSRF protection - check token for all POST requests except logout
     if (!isset($_POST['logout'])) {
@@ -1085,10 +1113,26 @@ $allRoutes = getPeerRoutes();
                     </td>
                     <td>
                         <div class="user-actions">
-                            <button class="btn btn-danger btn-sm" 
-                                    data-user-index="<?php echo (int)$index; ?>" 
-                                    onclick="confirmDelete(this)" 
-                                    data-bs-toggle="modal" 
+                            <?php if (!empty($vpnCfg['L2TP_ENABLED'])): ?>
+                            <button class="btn btn-primary btn-sm script-btn"
+                                    data-user="<?php echo sanitizeOutput($user['client']); ?>"
+                                    data-pass="<?php echo sanitizeOutput($user['secret']); ?>"
+                                    data-ip="<?php echo sanitizeOutput($user['ip']); ?>"
+                                    data-nassecret="<?php echo sanitizeOutput($nasSecrets[$user['ip']] ?? ''); ?>"
+                                    data-type="l2tp" data-bs-toggle="modal" data-bs-target="#scriptModal">L2TP</button>
+                            <?php endif; ?>
+                            <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
+                            <button class="btn btn-info btn-sm script-btn"
+                                    data-user="<?php echo sanitizeOutput($user['client']); ?>"
+                                    data-pass="<?php echo sanitizeOutput($user['secret']); ?>"
+                                    data-ip="<?php echo sanitizeOutput($user['ip']); ?>"
+                                    data-nassecret="<?php echo sanitizeOutput($nasSecrets[$user['ip']] ?? ''); ?>"
+                                    data-type="ovpn" data-bs-toggle="modal" data-bs-target="#scriptModal">OVPN</button>
+                            <?php endif; ?>
+                            <button class="btn btn-danger btn-sm"
+                                    data-user-index="<?php echo (int)$index; ?>"
+                                    onclick="confirmDelete(this)"
+                                    data-bs-toggle="modal"
                                     data-bs-target="#confirmDeleteModal">Delete User</button>
                         </div>
                     </td>
@@ -1298,6 +1342,27 @@ $allRoutes = getPeerRoutes();
     </div>
 </div>
 
+<!-- MikroTik Script Modal -->
+<div class="modal fade" id="scriptModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="scriptModalLabel">MikroTik Script</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted mb-2" id="scriptHint"></p>
+        <textarea id="scriptText" class="form-control" style="font-family:monospace;font-size:13px;white-space:pre;" rows="16" readonly></textarea>
+        <div class="alert alert-warning mt-3 mb-0" id="scriptRadiusNote" style="font-size:13px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="copyScriptBtn">Copy to Clipboard</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Change Password Modal -->
 <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -1328,6 +1393,17 @@ $allRoutes = getPeerRoutes();
 </div>
 
 <script>
+    // VPN coexistence flags + server params echoed from PHP
+    const VPN = <?php echo json_encode(['l2tp' => !empty($vpnCfg['L2TP_ENABLED']), 'ovpn' => !empty($vpnCfg['OVPN_ENABLED'])]); ?>;
+    const SRV = <?php echo json_encode([
+        'ip'         => $vpnCfg['SERVER_IP'],
+        'ipsecPsk'   => $vpnCfg['L2TP_PSK'],
+        'l2tpRadius' => $vpnCfg['L2TP_RADIUS'],
+        'ovpnRadius' => $vpnCfg['OVPN_RADIUS'],
+        'ovpnPort'   => $vpnCfg['OVPN_PORT'],
+        'coaPort'    => $vpnCfg['COA_PORT'],
+    ]); ?>;
+
     // Retrieve CSRF token from hidden input on the page
     function getCSRFToken() {
         const tokenInput = document.querySelector('input[name="csrf_token"]');
@@ -1423,6 +1499,8 @@ $allRoutes = getPeerRoutes();
                       </td>
                       <td>
                           <div class="user-actions">
+                              ${VPN.l2tp ? `<button class="btn btn-primary btn-sm script-btn" data-user="${client}" data-pass="${secret}" data-ip="${data.ip}" data-nassecret="" data-type="l2tp" data-bs-toggle="modal" data-bs-target="#scriptModal">L2TP</button>` : ''}
+                              ${VPN.ovpn ? `<button class="btn btn-info btn-sm script-btn" data-user="${client}" data-pass="${secret}" data-ip="${data.ip}" data-nassecret="" data-type="ovpn" data-bs-toggle="modal" data-bs-target="#scriptModal">OVPN</button>` : ''}
                               <button class="btn btn-danger btn-sm" onclick="confirmDelete(${newIndex})" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete User</button>
                           </div>
                       </td>
@@ -2118,6 +2196,93 @@ $allRoutes = getPeerRoutes();
         });
     }
     
+    // ==================== MikroTik Script Generator ====================
+    function buildL2tpScript(u, p, ip, nasSecret) {
+        const secret = nasSecret || 'NAS_SECRET';
+        return `# ===== L2TP/IPsec client for ${u} =====
+/interface l2tp-client
+add name=l2tp-sas connect-to=${SRV.ip} user=${u} password=${p} \\
+    use-ipsec=yes ipsec-secret=${SRV.ipsecPsk} profile=default-encryption \\
+    add-default-route=no disabled=no
+
+# ===== RADIUS (add once on this router) =====
+# Optional: clear old radius servers for these services first:
+# /radius remove [find where service~"ppp" or service~"hotspot" or service~"login"]
+/radius
+add service=hotspot,ppp,login address=${SRV.l2tpRadius} secret=${secret} timeout=3s
+/radius incoming
+set accept=yes port=${SRV.coaPort}`;
+    }
+
+    function buildOvpnScript(u, p) {
+        return `# ===== OpenVPN (TCP) client for ${u} =====
+/interface ovpn-client
+add name=ovpn-sas connect-to=${SRV.ip} port=${SRV.ovpnPort} protocol=tcp \\
+    user=${u} password=${p} auth=sha1 cipher=aes256-cbc certificate=none \\
+    verify-server-certificate=no add-default-route=no disabled=no
+# RouterOS 6: use  cipher=aes256
+
+# ===== RADIUS (add once on this router) =====
+/radius
+add service=hotspot,ppp,login address=${SRV.ovpnRadius} secret=NAS_SECRET timeout=3s
+/radius incoming
+set accept=yes port=${SRV.coaPort}`;
+    }
+
+    // Delegated click handler for the per-user L2TP/OVPN script buttons
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.script-btn');
+        if (!btn) return;
+        const u = btn.dataset.user || '';
+        const p = btn.dataset.pass || '';
+        const ip = btn.dataset.ip || '';
+        const nasSecret = btn.dataset.nassecret || '';
+        const type = btn.dataset.type || 'l2tp';
+
+        const label = document.getElementById('scriptModalLabel');
+        const hint = document.getElementById('scriptHint');
+        const text = document.getElementById('scriptText');
+        const note = document.getElementById('scriptRadiusNote');
+
+        if (type === 'ovpn') {
+            label.textContent = 'MikroTik Script — OVPN (' + u + ')';
+            hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over OpenVPN.';
+            text.value = buildOvpnScript(u, p);
+            note.textContent = '⚠ Over OVPN the router gets a dynamic IP from 10.10.30.0/24. After it connects, check the ovpn-client interface IP, add THAT IP in SAS → NAS with a shared secret, then set NAS_SECRET to match.';
+        } else {
+            label.textContent = 'MikroTik Script — L2TP (' + u + ')';
+            hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over L2TP/IPsec.';
+            text.value = buildL2tpScript(u, p, ip, nasSecret);
+            if (nasSecret) {
+                note.textContent = 'RADIUS secret already filled: tunnel IP ' + ip + ' is registered in SAS → NAS with secret ' + nasSecret + '.';
+            } else {
+                note.textContent = '⚠ Tunnel IP ' + ip + ' is NOT yet in SAS → NAS. Add it there with a shared secret, then replace NAS_SECRET in the script. Without this, RADIUS auth is rejected.';
+            }
+        }
+    });
+
+    // Copy-to-clipboard for the script modal
+    const copyScriptBtn = document.getElementById('copyScriptBtn');
+    if (copyScriptBtn) {
+        copyScriptBtn.addEventListener('click', function() {
+            const text = document.getElementById('scriptText');
+            text.focus();
+            text.select();
+            const done = () => {
+                const original = copyScriptBtn.textContent;
+                copyScriptBtn.textContent = 'Copied ✓';
+                setTimeout(() => { copyScriptBtn.textContent = original; }, 1500);
+            };
+            let copied = false;
+            try { copied = document.execCommand('copy'); } catch (err) { copied = false; }
+            if (copied) {
+                done();
+            } else if (navigator.clipboard) {
+                navigator.clipboard.writeText(text.value).then(done).catch(() => {});
+            }
+        });
+    }
+
     // ==================== Confirmation Dialog Enhancement ====================
     // Add keyboard shortcut for search
     document.addEventListener('keydown', function(e) {

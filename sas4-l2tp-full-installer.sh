@@ -20,6 +20,22 @@ NC='\033[0m' # No Color
 # Report the line that failed instead of dying silently.
 trap 'echo -e "${RED}❌ Installation FAILED at line $LINENO. The server may be half-configured — re-run this script after fixing the error above.${NC}" >&2' ERR
 
+# Upsert a single key into the shared dual-VPN state file. Both the L2TP and the
+# OVPN installers write here key-by-key so running one never clobbers the other's
+# keys — the l2tp-manager panel reads this to know which VPNs are live.
+set_vpn_conf() {   # usage: set_vpn_conf KEY VALUE
+    local k="$1" v="$2" f="/etc/l2tp-manager/vpn.conf"
+    mkdir -p /etc/l2tp-manager
+    touch "$f"
+    if grep -q "^${k}=" "$f"; then
+        sed -i "s|^${k}=.*|${k}=${v}|" "$f"
+    else
+        echo "${k}=${v}" >> "$f"
+    fi
+    chown root:www-data "$f" 2>/dev/null || true
+    chmod 640 "$f"
+}
+
 # Require root (the script uses sudo throughout, but bail early if sudo is missing).
 if [[ $EUID -ne 0 ]] && ! sudo -n true 2>/dev/null; then
     echo -e "${RED}This script needs root. Run with: sudo $0${NC}" >&2
@@ -264,6 +280,23 @@ else
     echo -e "${RED}❌ xl2tpd is NOT listening on UDP 1701 — install is incomplete. Check 'journalctl -u xl2tpd'.${NC}" >&2
     exit 1
 fi
+
+# Record this L2TP install into the shared dual-VPN state file so the panel (and
+# any OVPN install that ran, or runs later) knows L2TP is live. Detect the public
+# server IP the same way all-in-one-installer.sh does.
+echo ""
+echo -e "${CYAN}📝 Recording L2TP config in /etc/l2tp-manager/vpn.conf...${NC}"
+SERVER_IP=$(hostname -I | awk '{print $1}')
+[ -z "$SERVER_IP" ] && SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1)
+[ -z "$SERVER_IP" ] && SERVER_IP=$(ip addr show | grep -oP 'inet \K[\d.]+' | grep -v '^127\.' | head -1)
+[ -z "$SERVER_IP" ] && SERVER_IP="your-server-ip"
+
+set_vpn_conf SERVER_IP    "$SERVER_IP"
+set_vpn_conf COA_PORT     1700
+set_vpn_conf L2TP_ENABLED 1
+set_vpn_conf L2TP_PSK     "$PSK"
+set_vpn_conf L2TP_RADIUS  10.255.10.10
+echo -e "${GREEN}📝 Recorded L2TP config in /etc/l2tp-manager/vpn.conf${NC}"
 
 echo ""
 echo -e "${GREEN}==============================================${NC}"
