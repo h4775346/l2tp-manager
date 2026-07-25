@@ -556,8 +556,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         exit();
     } elseif (isset($_POST['delete'])) {
-        $index = (int)($_POST['index'] ?? -1);
-        
+        $rawIndex = $_POST['index'] ?? '';
+
+        // Strict validation: index must be a non-negative integer string.
+        // A loose (int) cast silently turns garbage (e.g. "[object HTMLButtonElement]")
+        // into 0 and deletes the FIRST user instead of the selected one.
+        if (!is_string($rawIndex) && !is_int($rawIndex)) {
+            echo json_encode(['error' => safeErrorMessage('Invalid user index')]);
+            exit();
+        }
+        $rawIndex = (string)$rawIndex;
+        if (!preg_match('/^\d+$/', $rawIndex)) {
+            echo json_encode(['error' => safeErrorMessage('Invalid user index')]);
+            exit();
+        }
+        $index = (int)$rawIndex;
+
         // Validate index
         if ($index < 0 || $index >= count($users)) {
             echo json_encode(['error' => safeErrorMessage('Invalid user index')]);
@@ -1480,7 +1494,8 @@ $allRoutes = getPeerRoutes();
                     } else {
                         const newRow = document.createElement('tr');
                         newRow.classList.add('fade-in');
-                        const newIndex = document.getElementById('userTable').rows.length;
+                        // rows.length includes the header row; user indexes are 0-based
+                        const newIndex = document.getElementById('userTable').rows.length - 1;
                         newRow.id = `user-${newIndex}`;
                         newRow.innerHTML = `
                       <td>${client}</td>
@@ -1655,7 +1670,12 @@ $allRoutes = getPeerRoutes();
         }
     }
 
-    function confirmDelete(index) {
+    function confirmDelete(arg) {
+        // PHP-rendered rows pass the button element (onclick="confirmDelete(this)");
+        // dynamically added rows pass the numeric index directly.
+        const index = (arg !== null && typeof arg === 'object')
+            ? arg.getAttribute('data-user-index')
+            : arg;
         document.getElementById('deleteIndex').value = index;
     }
 
@@ -1673,14 +1693,25 @@ $allRoutes = getPeerRoutes();
             fetch('', {
                 method: 'POST',
                 body: formData
-            }).then(response => response.text())
+            }).then(response => response.json())
                 .then(data => {
-                    const row = document.getElementById(`user-${index}`);
-                    row.classList.add('fade-out');
-                    setTimeout(() => {
-                        if (row) row.remove();
+                    if (data.error) {
+                        document.getElementById('errorMessage').textContent = data.error;
+                        document.getElementById('errorModal').classList.add('show');
+                        document.getElementById('errorModal').style.display = 'block';
                         document.querySelector('#confirmDeleteModal .btn-close').click();
-                    }, 500);
+                        return;
+                    }
+                    const row = document.getElementById(`user-${index}`);
+                    if (row) {
+                        row.classList.add('fade-out');
+                        setTimeout(() => {
+                            row.remove();
+                            document.querySelector('#confirmDeleteModal .btn-close').click();
+                        }, 500);
+                    } else {
+                        location.reload();
+                    }
                 })
                 .catch(error => {
                     console.error('Error:', error);
