@@ -45,20 +45,92 @@ $_SESSION['last_activity'] = time();
 $config = include 'config.php';
 $file = $config['chap_secrets_path'];
 
+/**
+ * Parse one chap-secrets line (supports quoted fields with spaces/special chars).
+ * Returns [client, server, secret, ip] or null.
+ */
+function parseChapLine($line) {
+    $line = trim($line);
+    if ($line === '' || $line[0] === '#') {
+        return null;
+    }
+    // Skip default tunnel placeholder line
+    if (preg_match('/^"?tunnel"?\s+/i', $line)) {
+        return null;
+    }
+
+    $parts = str_getcsv($line, ' ', '"');
+    // Collapse empty tokens created by multiple spaces
+    $parts = array_values(array_filter($parts, function ($p) {
+        return $p !== null && $p !== '';
+    }));
+    if (count($parts) < 4) {
+        // Fallback: tab-separated exports
+        $parts = str_getcsv($line, "\t", '"');
+        $parts = array_values(array_filter($parts, function ($p) {
+            return $p !== null && $p !== '';
+        }));
+    }
+    if (count($parts) < 4) {
+        return null;
+    }
+
+    // If more than 4 fields (password with unquoted spaces), join middle as secret
+    if (count($parts) > 4) {
+        $client = $parts[0];
+        $server = $parts[1];
+        $ip = $parts[count($parts) - 1];
+        $secret = implode(' ', array_slice($parts, 2, -1));
+    } else {
+        list($client, $server, $secret, $ip) = $parts;
+    }
+
+    $client = trim($client, " \t\"'");
+    $server = trim($server, " \t\"'");
+    $secret = trim($secret, " \t");
+    // secret may be double-quoted as a whole
+    if (strlen($secret) >= 2 && $secret[0] === '"' && substr($secret, -1) === '"') {
+        $secret = substr($secret, 1, -1);
+    }
+    $ip = trim($ip, " \t\"'");
+
+    if ($client === '' || $client === 'tunnel') {
+        return null;
+    }
+
+    return [
+        'client' => $client,
+        'server' => $server !== '' ? $server : '*',
+        'secret' => $secret,
+        'ip' => $ip !== '' ? $ip : '*',
+    ];
+}
+
+/** Quote a chap-secrets field when it contains whitespace or special chars. */
+function quoteChapField($value) {
+    $value = (string)$value;
+    // Never allow newlines/nulls into the secrets file
+    $value = str_replace(["\0", "\r", "\n"], '', $value);
+    if ($value === '' || preg_match('/[\s"#\\\\]/', $value)) {
+        return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $value) . '"';
+    }
+    return $value;
+}
+
 // Read the file into an array
 function readUsers($file) {
     $users = [];
+    if (!is_readable($file)) {
+        return $users;
+    }
     $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return $users;
+    }
     foreach ($lines as $line) {
-        if (strpos($line, '#') === 0 || strpos($line, 'tunnel') === 0) continue; // Skip comments and tunnel line
-        $parts = preg_split('/\s+/', $line);
-        if (count($parts) == 4) {
-            $users[] = [
-                'client' => trim($parts[0], '"'),
-                'server' => $parts[1],
-                'secret' => $parts[2],
-                'ip' => $parts[3]
-            ];
+        $parsed = parseChapLine($line);
+        if ($parsed !== null) {
+            $users[] = $parsed;
         }
     }
     return $users;
@@ -72,29 +144,117 @@ function writeUsers($file, $users) {
     if ($validatedPath === false) {
         throw new Exception('Invalid file path');
     }
-    
+
     $content = "# Secrets for authentication using CHAP\n";
-    $content .= "# client server secret IP addresses\n";
-    $content .= "tunnel tunnel tunnel *\n";
+    $content .= "# client\tserver\tsecret\t\t\tIP addresses\n";
+    $content .= "tunnel\ttunnel\ttunnel\t*\n";
     foreach ($users as $user) {
-        // Sanitize user data before writing
-        // Allow special chars like @ and . in usernames; quote if needed
-        $client = $user['client'];
-        if (preg_match('/[@.\-]/', $client) && strpos($client, '@') !== false) {
-            $client = '"' . $client . '"';
+        $client = isset($user['client']) ? str_replace(["\0", "\r", "\n"], '', (string)$user['client']) : '';
+        $server = isset($user['server']) ? preg_replace('/[^*a-zA-Z0-9_.-]/', '', (string)$user['server']) : '*';
+        if ($server === '') {
+            $server = '*';
         }
-        $server = preg_replace('/[^*a-zA-Z0-9_-]/', '', $user['server']);
-        $secret = preg_replace('/[\x00-\x1F\x7F]/', '', $user['secret']); // Remove control characters
-        $ip = preg_replace('/[^0-9.*]/', '', $user['ip']);
-        
+        $secret = isset($user['secret']) ? preg_replace('/[\x00-\x1F\x7F]/', '', (string)$user['secret']) : '';
+        $ip = isset($user['ip']) ? preg_replace('/[^0-9.*]/', '', (string)$user['ip']) : '*';
+
+        if ($client === '' || $client === 'tunnel') {
+            continue;
+        }
         // Validate IP format
         if (!validateIP($ip) && $ip !== '*') {
             continue; // Skip invalid IPs
         }
-        
-        $content .= "{$client} {$server} {$secret} {$ip}\n";
+
+        $content .= quoteChapField($client) . "\t"
+            . quoteChapField($server) . "\t"
+            . quoteChapField($secret) . "\t"
+            . $ip . "\n";
     }
-    file_put_contents($validatedPath, $content);
+    if (file_put_contents($validatedPath, $content) === false) {
+        throw new Exception('Failed to write chap-secrets');
+    }
+}
+
+/**
+ * Parse CSV content exported by this panel (or compatible).
+ * Expected headers (case-insensitive): Username, Server, Password, IP Address
+ * Returns list of user arrays; throws Exception on hard parse failure.
+ */
+function parseUsersCsv($csvText) {
+    $csvText = str_replace("\r\n", "\n", (string)$csvText);
+    $csvText = str_replace("\r", "\n", $csvText);
+    $csvText = preg_replace('/^\xEF\xBB\xBF/', '', $csvText); // strip UTF-8 BOM
+    $lines = explode("\n", $csvText);
+    $rows = [];
+    foreach ($lines as $line) {
+        if (trim($line) === '') {
+            continue;
+        }
+        $rows[] = str_getcsv($line);
+    }
+    if (empty($rows)) {
+        throw new Exception('CSV file is empty');
+    }
+
+    // Detect header
+    $header = array_map(function ($h) {
+        return strtolower(trim((string)$h));
+    }, $rows[0]);
+    $map = [
+        'username' => null,
+        'server' => null,
+        'password' => null,
+        'ip' => null,
+    ];
+    foreach ($header as $i => $col) {
+        $col = preg_replace('/\s+/', ' ', $col);
+        if (in_array($col, ['username', 'user', 'client', 'name'], true)) {
+            $map['username'] = $i;
+        } elseif (in_array($col, ['server', 'srv'], true)) {
+            $map['server'] = $i;
+        } elseif (in_array($col, ['password', 'secret', 'pass', 'pwd'], true)) {
+            $map['password'] = $i;
+        } elseif (in_array($col, ['ip address', 'ip', 'ipaddress', 'address'], true)) {
+            $map['ip'] = $i;
+        }
+    }
+
+    $start = 0;
+    $hasHeader = ($map['username'] !== null && $map['password'] !== null);
+    if ($hasHeader) {
+        $start = 1;
+    } else {
+        // No header — assume Username,Server,Password,IP
+        $map = ['username' => 0, 'server' => 1, 'password' => 2, 'ip' => 3];
+        $start = 0;
+    }
+
+    $users = [];
+    for ($r = $start; $r < count($rows); $r++) {
+        $row = $rows[$r];
+        if (!is_array($row) || count(array_filter($row, function ($c) { return trim((string)$c) !== ''; })) === 0) {
+            continue;
+        }
+        $client = isset($row[$map['username']]) ? trim((string)$row[$map['username']]) : '';
+        $server = ($map['server'] !== null && isset($row[$map['server']])) ? trim((string)$row[$map['server']]) : '*';
+        $secret = isset($row[$map['password']]) ? (string)$row[$map['password']] : '';
+        $ip = ($map['ip'] !== null && isset($row[$map['ip']])) ? trim((string)$row[$map['ip']]) : '';
+
+        // Skip accidental repeated header rows
+        if (strtolower($client) === 'username' && strtolower($secret) === 'password') {
+            continue;
+        }
+
+        $users[] = [
+            'client' => $client,
+            'server' => $server !== '' ? $server : '*',
+            'secret' => $secret,
+            'ip' => $ip,
+            '_line' => $r + 1,
+        ];
+    }
+
+    return $users;
 }
 
 // Get L2TP service status
@@ -700,6 +860,252 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['error' => safeErrorMessage('Failed to save users')]);
         }
         exit();
+    } elseif (isset($_POST['importUsers'])) {
+        header('Content-Type: application/json');
+
+        // Mode: merge (default) = add new only; upsert = add/update by username;
+        // replace = wipe existing users then import.
+        $mode = strtolower(trim((string)($_POST['importMode'] ?? 'merge')));
+        if (!in_array($mode, ['merge', 'upsert', 'replace'], true)) {
+            echo json_encode(['error' => safeErrorMessage('Invalid import mode')]);
+            exit();
+        }
+
+        $csvText = '';
+        if (isset($_FILES['csv_file']) && is_array($_FILES['csv_file'])) {
+            $f = $_FILES['csv_file'];
+            if (($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                echo json_encode(['error' => safeErrorMessage('CSV upload failed')]);
+                exit();
+            }
+            if (($f['size'] ?? 0) <= 0 || ($f['size'] ?? 0) > 2 * 1024 * 1024) {
+                echo json_encode(['error' => safeErrorMessage('CSV must be between 1 byte and 2 MB')]);
+                exit();
+            }
+            $tmp = $f['tmp_name'] ?? '';
+            if ($tmp === '' || !is_uploaded_file($tmp)) {
+                echo json_encode(['error' => safeErrorMessage('Invalid upload')]);
+                exit();
+            }
+            $csvText = file_get_contents($tmp);
+        } else {
+            $csvText = (string)($_POST['csv_text'] ?? '');
+        }
+
+        if (trim($csvText) === '') {
+            echo json_encode(['error' => safeErrorMessage('No CSV data provided')]);
+            exit();
+        }
+
+        try {
+            $imported = parseUsersCsv($csvText);
+        } catch (Exception $e) {
+            echo json_encode(['error' => safeErrorMessage($e->getMessage())]);
+            exit();
+        }
+
+        if (empty($imported)) {
+            echo json_encode(['error' => safeErrorMessage('No user rows found in CSV')]);
+            exit();
+        }
+        if (count($imported) > 2000) {
+            echo json_encode(['error' => safeErrorMessage('CSV exceeds 2000 users per import')]);
+            exit();
+        }
+
+        $existingByName = [];
+        $existingByIp = [];
+        foreach ($users as $idx => $u) {
+            $existingByName[$u['client']] = $idx;
+            if (!empty($u['ip']) && $u['ip'] !== '*') {
+                $existingByIp[$u['ip']] = $idx;
+            }
+        }
+
+        $added = 0;
+        $updated = 0;
+        $skipped = 0;
+        $errors = [];
+        $resultUsers = ($mode === 'replace') ? [] : $users;
+
+        if ($mode === 'replace') {
+            $existingByName = [];
+            $existingByIp = [];
+        }
+
+        // First pass: validate + resolve IPs for this batch
+        $batchNames = [];
+        $batchIps = [];
+        $prepared = [];
+
+        foreach ($imported as $row) {
+            $client = sanitizeInput($row['client'] ?? '');
+            $server = sanitizeInput($row['server'] ?? '*');
+            if ($server === '') {
+                $server = '*';
+            }
+            $secret = isset($row['secret']) ? (string)$row['secret'] : '';
+            $ip = sanitizeInput($row['ip'] ?? '');
+            $lineNo = (int)($row['_line'] ?? 0);
+
+            if ($client === '') {
+                $errors[] = "Line {$lineNo}: username is required";
+                $skipped++;
+                continue;
+            }
+            if (!validateUsername($client)) {
+                $errors[] = "Line {$lineNo}: invalid username '{$client}'";
+                $skipped++;
+                continue;
+            }
+            if ($secret === '' || strlen($secret) > 128) {
+                $errors[] = "Line {$lineNo}: password missing or too long for '{$client}'";
+                $skipped++;
+                continue;
+            }
+            // chap-secrets passwords: reject only control chars / nulls
+            if (preg_match('/[\x00-\x1F\x7F]/', $secret)) {
+                $errors[] = "Line {$lineNo}: password has invalid control characters for '{$client}'";
+                $skipped++;
+                continue;
+            }
+
+            if ($ip === '') {
+                // auto-assign later after we know reserved set
+                $ip = null;
+            } elseif ($ip !== '*') {
+                if (!validateIP($ip)) {
+                    $errors[] = "Line {$lineNo}: invalid IP '{$ip}' for '{$client}'";
+                    $skipped++;
+                    continue;
+                }
+            }
+
+            // Duplicate username within the CSV itself
+            if (isset($batchNames[$client])) {
+                $errors[] = "Line {$lineNo}: duplicate username in CSV '{$client}'";
+                $skipped++;
+                continue;
+            }
+
+            $nameExists = array_key_exists($client, $existingByName);
+            if ($nameExists && $mode === 'merge') {
+                $skipped++;
+                continue;
+            }
+
+            $prepared[] = [
+                'client' => $client,
+                'server' => $server,
+                'secret' => $secret,
+                'ip' => $ip,
+                'exists' => $nameExists,
+                'line' => $lineNo,
+            ];
+            $batchNames[$client] = true;
+        }
+
+        // Build working name/ip maps for assignment
+        $workByName = $existingByName;
+        $workByIp = $existingByIp;
+        // Seed IP map from current resultUsers
+        $workByIp = [];
+        foreach ($resultUsers as $idx => $u) {
+            $workByName[$u['client']] = $idx;
+            if (!empty($u['ip']) && $u['ip'] !== '*') {
+                $workByIp[$u['ip']] = $idx;
+            }
+        }
+
+        foreach ($prepared as $row) {
+            $client = $row['client'];
+            $ip = $row['ip'];
+
+            if ($ip === null) {
+                // getNextIp based on current resultUsers
+                $ip = getNextIp($resultUsers);
+                // ensure uniqueness vs batch-assigned
+                $guard = 0;
+                while ((isset($workByIp[$ip]) || isset($batchIps[$ip])) && $guard < 10000) {
+                    $long = ip2long($ip);
+                    if ($long === false) {
+                        break;
+                    }
+                    $ip = long2ip($long + 1);
+                    $guard++;
+                }
+            }
+
+            // IP conflict checks
+            if ($ip !== '*' && isset($workByIp[$ip])) {
+                $ownerIdx = $workByIp[$ip];
+                $ownerName = $resultUsers[$ownerIdx]['client'] ?? '';
+                if ($ownerName !== $client) {
+                    // upsert of same user keeping same IP is OK; otherwise skip
+                    if (!($row['exists'] && $mode === 'upsert' && $ownerName === $client)) {
+                        $errors[] = "Line {$row['line']}: IP {$ip} already used by '{$ownerName}'";
+                        $skipped++;
+                        continue;
+                    }
+                }
+            }
+            if ($ip !== '*' && isset($batchIps[$ip]) && $batchIps[$ip] !== $client) {
+                $errors[] = "Line {$row['line']}: IP {$ip} duplicated in CSV";
+                $skipped++;
+                continue;
+            }
+
+            $entry = [
+                'client' => $client,
+                'server' => $row['server'],
+                'secret' => $row['secret'],
+                'ip' => $ip,
+            ];
+
+            if ($row['exists'] && $mode === 'upsert' && isset($workByName[$client])) {
+                $idx = $workByName[$client];
+                // free old IP mapping if changed
+                $oldIp = $resultUsers[$idx]['ip'] ?? '';
+                if ($oldIp && $oldIp !== '*' && isset($workByIp[$oldIp]) && $workByIp[$oldIp] === $idx) {
+                    unset($workByIp[$oldIp]);
+                }
+                $resultUsers[$idx] = $entry;
+                $workByIp[$ip] = $idx;
+                $updated++;
+            } else {
+                $resultUsers[] = $entry;
+                $newIdx = count($resultUsers) - 1;
+                $workByName[$client] = $newIdx;
+                if ($ip !== '*') {
+                    $workByIp[$ip] = $newIdx;
+                }
+                $added++;
+            }
+            if ($ip !== '*') {
+                $batchIps[$ip] = $client;
+            }
+        }
+
+        // Re-index after possible upserts
+        $resultUsers = array_values($resultUsers);
+
+        try {
+            writeUsers($file, $resultUsers);
+            $users = $resultUsers;
+            echo json_encode([
+                'success' => true,
+                'mode' => $mode,
+                'added' => $added,
+                'updated' => $updated,
+                'skipped' => $skipped,
+                'total' => count($resultUsers),
+                'errors' => array_slice($errors, 0, 50),
+                'error_count' => count($errors),
+            ]);
+        } catch (Exception $e) {
+            echo json_encode(['error' => safeErrorMessage('Failed to save imported users')]);
+        }
+        exit();
     } elseif (isset($_POST['changePassword'])) {
         $oldPassword = $_POST['oldPassword'] ?? '';
         $newPassword = $_POST['newPassword'] ?? '';
@@ -1059,6 +1465,7 @@ $allRoutes = getPeerRoutes();
         </div>
         <div class="col-md-6 text-end">
             <span class="text-muted me-3">Total: <strong id="userCount"><?php echo count($users); ?></strong> users</span>
+            <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#importUsersModal">📤 Import CSV</button>
             <button class="btn btn-outline-success" onclick="exportUsers()">📥 Export CSV</button>
             <button class="btn btn-outline-info" onclick="toggleShowPasswords()">👁️ Toggle Passwords</button>
         </div>
@@ -1250,6 +1657,54 @@ $allRoutes = getPeerRoutes();
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-danger" id="confirmDeleteButton">Delete User</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import CSV Modal -->
+    <div class="modal fade" id="importUsersModal" tabindex="-1" aria-labelledby="importUsersModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="importUsersModalLabel">Import Users from CSV</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">
+                        Accepts the same format as <strong>Export CSV</strong>:
+                        <code>Username,Server,Password,IP Address</code>. Max 2000 rows / 2&nbsp;MB.
+                    </p>
+                    <div class="mb-3">
+                        <label for="importCsvFile" class="form-label">CSV file</label>
+                        <input type="file" class="form-control" id="importCsvFile" accept=".csv,text/csv,text/plain">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Import mode</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="importMode" id="importModeMerge" value="merge" checked>
+                            <label class="form-check-label" for="importModeMerge">
+                                <strong>Merge</strong> — add new usernames only (skip existing)
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="importMode" id="importModeUpsert" value="upsert">
+                            <label class="form-check-label" for="importModeUpsert">
+                                <strong>Upsert</strong> — add new, update password/IP if username exists
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="importMode" id="importModeReplace" value="replace">
+                            <label class="form-check-label" for="importModeReplace">
+                                <strong>Replace</strong> — delete all current users, then import
+                            </label>
+                        </div>
+                    </div>
+                    <div id="importResult" class="alert d-none" role="alert"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="importUsersButton">Import</button>
                 </div>
             </div>
         </div>
@@ -2203,6 +2658,85 @@ $allRoutes = getPeerRoutes();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
     }
+
+    // ==================== Import Users ====================
+    (function initImportUsers() {
+        const btn = document.getElementById('importUsersButton');
+        const fileInput = document.getElementById('importCsvFile');
+        const resultBox = document.getElementById('importResult');
+        if (!btn || !fileInput) return;
+
+        btn.addEventListener('click', function() {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) {
+                resultBox.className = 'alert alert-warning';
+                resultBox.textContent = 'Please choose a CSV file first.';
+                resultBox.classList.remove('d-none');
+                return;
+            }
+
+            const modeEl = document.querySelector('input[name="importMode"]:checked');
+            const mode = modeEl ? modeEl.value : 'merge';
+
+            if (mode === 'replace') {
+                if (!confirm('Replace mode will DELETE all existing L2TP users, then import from the CSV. Continue?')) {
+                    return;
+                }
+            }
+
+            const formData = new FormData();
+            formData.append('importUsers', '1');
+            formData.append('importMode', mode);
+            formData.append('csv_file', file);
+            formData.append('csrf_token', getCSRFToken());
+
+            const original = btn.textContent;
+            btn.textContent = 'Importing...';
+            btn.disabled = true;
+            resultBox.className = 'alert alert-info';
+            resultBox.textContent = 'Uploading and importing...';
+            resultBox.classList.remove('d-none');
+
+            fetch('', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        resultBox.className = 'alert alert-danger';
+                        resultBox.textContent = data.error;
+                        return;
+                    }
+                    let msg = `Done (${data.mode}): added ${data.added}, updated ${data.updated}, skipped ${data.skipped}. Total users now: ${data.total}.`;
+                    if (data.error_count && data.error_count > 0) {
+                        msg += ` ${data.error_count} row error(s).`;
+                        if (data.errors && data.errors.length) {
+                            msg += '\n' + data.errors.slice(0, 10).join('\n');
+                        }
+                    }
+                    resultBox.className = 'alert alert-success';
+                    resultBox.style.whiteSpace = 'pre-wrap';
+                    resultBox.textContent = msg;
+                    // Reload so table reflects chap-secrets
+                    setTimeout(function() { window.location.reload(); }, 1200);
+                })
+                .catch(err => {
+                    resultBox.className = 'alert alert-danger';
+                    resultBox.textContent = 'Import failed: ' + err;
+                })
+                .finally(() => {
+                    btn.textContent = original;
+                    btn.disabled = false;
+                });
+        });
+
+        // Clear previous result when modal opens
+        const modal = document.getElementById('importUsersModal');
+        if (modal) {
+            modal.addEventListener('show.bs.modal', function() {
+                resultBox.className = 'alert d-none';
+                resultBox.textContent = '';
+            });
+        }
+    })();
     
     // ==================== Toggle Passwords ====================
     let passwordsHidden = false;

@@ -12,6 +12,7 @@ A powerful, web-based management interface for VPN servers with advanced per-use
 - **🔐 Secure Web Interface** - Manage users through HTTPS with modern authentication
 - **🔀 Dual VPN** - L2TP/IPSec **and** OpenVPN-over-TCP from a single panel
 - **👥 Shared User Store** - One `/etc/ppp/chap-secrets` serves both L2TP and OVPN
+- **📤 CSV Import / 📥 Export** - Bulk import users (merge / upsert / replace) from the same CSV the panel exports
 - **🛣️ Per-User Routing** - Assign custom routes to individual VPN users
 - **⚡ One-Click Installation** - Deploy everything with a single command
 - **📱 Responsive Design** - Works on desktop and mobile devices
@@ -89,6 +90,24 @@ After installation, access the management interface:
 ### Default Credentials
 - **Username**: `admin`
 - **Password**: `change@me` *(Please change this immediately)*
+
+## 📤 CSV Import / Export
+
+The panel toolbar has **Export CSV** and **Import CSV**.
+
+**CSV columns** (header row required for best results):
+
+```text
+Username,Server,Password,IP Address
+"nas1","*","secret","10.255.10.11"
+```
+
+**Import modes:**
+- **Merge** — add usernames that do not already exist (skip duplicates)
+- **Upsert** — add new users; update password/IP when the username already exists
+- **Replace** — delete all current users, then import the file (confirmation required)
+
+Limits: 2000 rows / 2 MB per upload. Empty IP cells get the next free address from the pool. Compatible with files produced by **Export CSV**.
 
 ## 🎯 Per-User Routing System
 
