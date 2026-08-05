@@ -1156,7 +1156,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Write the updated config back to the file
         try {
-            file_put_contents($validatedPath, '<?php return ' . var_export($config, true) . ';');
+            $written = file_put_contents($validatedPath, '<?php return ' . var_export($config, true) . ';');
+            if ($written === false) {
+                echo json_encode(['error' => safeErrorMessage('Failed to update password')]);
+                exit();
+            }
+            // Invalidate OPcache + stat cache so the next request reads the NEW config.
+            // Without this, Apache/mod_php keeps serving the old cached config.php
+            // (old password hash) for up to opcache.revalidate_freq seconds and the
+            // customer cannot login right after changing the password.
+            if (function_exists('opcache_invalidate')) {
+                opcache_invalidate($validatedPath, true);
+            }
+            clearstatcache(true, $validatedPath);
             echo json_encode(['success' => true]);
         } catch (Exception $e) {
             echo json_encode(['error' => safeErrorMessage('Failed to update password')]);
