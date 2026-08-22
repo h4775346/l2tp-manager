@@ -1454,9 +1454,9 @@ $allRoutes = getPeerRoutes();
 <aside class="sidebar">
     <div class="sidebar-brand">VPN Manager<span>SAS4 console</span></div>
     <nav class="sidebar-nav">
-        <a class="sidebar-link is-active" href="#users">Users</a>
-        <a class="sidebar-link" href="#online">Online</a>
-        <a class="sidebar-link" href="#services">Services</a>
+        <a class="sidebar-link is-active" href="#users" data-view="users">Users</a>
+        <a class="sidebar-link" href="#online" data-view="online">Online</a>
+        <a class="sidebar-link" href="#services" data-view="services">Services</a>
     </nav>
     <div class="sidebar-foot"><?php echo (int)count($users); ?> accounts</div>
 </aside>
@@ -1475,6 +1475,7 @@ $allRoutes = getPeerRoutes();
         </div>
     </header>
     <div class="content">
+    <div class="view-pane" id="view-services">
     <div class="status-rail" id="services">
     
     <?php if (!empty($vpnCfg['L2TP_ENABLED'])): ?>
@@ -1541,7 +1542,9 @@ $allRoutes = getPeerRoutes();
     </div>
     <?php endif; ?>
     </div>
+    </div>
 
+    <div class="view-pane" id="view-online">
     <div class="online-panel" id="online">
         <div class="svc-card-head" style="padding:0 0 10px">
             <span class="svc-name">Online now</span>
@@ -1568,7 +1571,9 @@ $allRoutes = getPeerRoutes();
             </table>
         </div>
     </div>
+    </div>
 
+    <div class="view-pane is-on" id="view-users">
     <div class="toolbar" id="users">
         <input type="text" class="search" id="userSearch" placeholder="Search username, IP, password…" onkeyup="filterUsers()">
         <button class="btn" type="button" onclick="clearSearch()">Clear</button>
@@ -1684,6 +1689,7 @@ $allRoutes = getPeerRoutes();
             <?php endforeach; ?>
             </tbody>
         </table>
+    </div>
     </div>
     </div><!-- .content -->
     </div><!-- .main -->
@@ -3220,8 +3226,42 @@ function kickSession(btn) {
     .catch(function(err) { alert('Error: ' + err); });
 }
 
-// Refresh status on page load
+function showView(name) {
+    name = name || 'users';
+    ['users', 'online', 'services'].forEach(function(v) {
+        const pane = document.getElementById('view-' + v);
+        if (pane) pane.classList.toggle('is-on', v === name);
+    });
+    document.querySelectorAll('.sidebar-link').forEach(function(a) {
+        a.classList.toggle('is-active', a.getAttribute('data-view') === name);
+    });
+    const titles = {
+        users: ['Users', 'Shared chap-secrets'],
+        online: ['Online', 'Connected sessions — disconnect kicks the tunnel'],
+        services: ['Services', 'Start / stop VPN daemons']
+    };
+    const t = titles[name] || titles.users;
+    const h = document.querySelector('.topbar-title h1');
+    const p = document.querySelector('.topbar-title p');
+    if (h) h.textContent = t[0];
+    if (p) p.textContent = t[1];
+    if (name === 'online') refreshOnline();
+    try { history.replaceState(null, '', '#' + name); } catch (e) {}
+}
+
+function bindSidebar() {
+    document.querySelectorAll('.sidebar-link[data-view]').forEach(function(a) {
+        a.addEventListener('click', function(e) {
+            e.preventDefault();
+            showView(a.getAttribute('data-view'));
+        });
+    });
+    const hash = (location.hash || '#users').replace('#', '');
+    showView(['users', 'online', 'services'].indexOf(hash) >= 0 ? hash : 'users');
+}
+
 document.addEventListener('DOMContentLoaded', function() {
+    bindSidebar();
     refreshServiceStatus();
     refreshOvpnServiceStatus();
     refreshSstpServiceStatus();

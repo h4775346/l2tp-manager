@@ -243,7 +243,9 @@ table.users td.mono {
 }
 .form-label, .form-check-label, .text-muted { color: var(--text-3) !important; }
 
-.online-panel { padding: 8px 24px 8px; }
+.view-pane { display: none; }
+.view-pane.is-on { display: block; }
+.online-panel { padding: 8px 24px 16px; }
 @media (max-width: 900px) {
   .online-panel { padding-left: 16px; padding-right: 16px; }
   .app-shell { grid-template-columns: 1fr; }
