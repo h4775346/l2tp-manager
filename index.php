@@ -1432,6 +1432,7 @@ $allRoutes = getPeerRoutes();
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/dashboard.css" rel="stylesheet">
+    <link href="assets/dashboard.mobile.css" rel="stylesheet">
 </head>
 <body>
 <?php
@@ -1456,7 +1457,6 @@ $allRoutes = getPeerRoutes();
     <nav class="sidebar-nav">
         <a class="sidebar-link is-active" href="#users" data-view="users">Users</a>
         <a class="sidebar-link" href="#online" data-view="online">Online</a>
-        <a class="sidebar-link" href="#services" data-view="services">Services</a>
     </nav>
     <div class="sidebar-foot"><?php echo (int)count($users); ?> accounts</div>
 </aside>
@@ -1475,7 +1475,6 @@ $allRoutes = getPeerRoutes();
         </div>
     </header>
     <div class="content">
-    <div class="view-pane" id="view-services">
     <div class="status-rail" id="services">
     
     <?php if (!empty($vpnCfg['L2TP_ENABLED'])): ?>
@@ -1541,7 +1540,6 @@ $allRoutes = getPeerRoutes();
         </div>
     </div>
     <?php endif; ?>
-    </div>
     </div>
 
     <div class="view-pane" id="view-online">
@@ -1698,7 +1696,6 @@ $allRoutes = getPeerRoutes();
     <nav class="phone-nav" aria-label="Phone">
         <button type="button" class="phone-nav-item is-active" data-view="users" onclick="showView('users')">Users</button>
         <button type="button" class="phone-nav-item" data-view="online" onclick="showView('online')">Online</button>
-        <button type="button" class="phone-nav-item" data-view="services" onclick="showView('services')">Services</button>
     </nav>
 
     <!-- Add User Modal -->
@@ -3233,8 +3230,8 @@ function kickSession(btn) {
 }
 
 function showView(name) {
-    name = name || 'users';
-    ['users', 'online', 'services'].forEach(function(v) {
+    name = (name === 'services') ? 'users' : (name || 'users');
+    ['users', 'online'].forEach(function(v) {
         const pane = document.getElementById('view-' + v);
         if (pane) pane.classList.toggle('is-on', v === name);
     });
@@ -3244,8 +3241,7 @@ function showView(name) {
     });
     const titles = {
         users: ['Users', 'Shared chap-secrets'],
-        online: ['Online', 'Connected sessions — disconnect kicks the tunnel'],
-        services: ['Services', 'Start / stop VPN daemons']
+        online: ['Online', 'Connected sessions — disconnect kicks the tunnel']
     };
     const t = titles[name] || titles.users;
     const h = document.querySelector('.topbar-title h1');
@@ -3264,7 +3260,7 @@ function bindSidebar() {
         });
     });
     const hash = (location.hash || '#users').replace('#', '');
-    showView(['users', 'online', 'services'].indexOf(hash) >= 0 ? hash : 'users');
+    showView(['users', 'online'].indexOf(hash) >= 0 ? hash : 'users');
 }
 
 document.addEventListener('DOMContentLoaded', function() {
