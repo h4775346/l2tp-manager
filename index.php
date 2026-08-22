@@ -1695,6 +1695,12 @@ $allRoutes = getPeerRoutes();
     </div><!-- .main -->
     </div><!-- .app-shell -->
 
+    <nav class="phone-nav" aria-label="Phone">
+        <button type="button" class="phone-nav-item is-active" data-view="users" onclick="showView('users')">Users</button>
+        <button type="button" class="phone-nav-item" data-view="online" onclick="showView('online')">Online</button>
+        <button type="button" class="phone-nav-item" data-view="services" onclick="showView('services')">Services</button>
+    </nav>
+
     <!-- Add User Modal -->
     <div class="modal fade" id="userModal" tabindex="-1" aria-labelledby="userModalLabel" aria-hidden="true">
         <div class="modal-dialog">
@@ -3232,8 +3238,9 @@ function showView(name) {
         const pane = document.getElementById('view-' + v);
         if (pane) pane.classList.toggle('is-on', v === name);
     });
-    document.querySelectorAll('.sidebar-link').forEach(function(a) {
-        a.classList.toggle('is-active', a.getAttribute('data-view') === name);
+    document.querySelectorAll('.sidebar-link, .phone-nav-item').forEach(function(a) {
+        const on = a.getAttribute('data-view') === name;
+        a.classList.toggle('is-active', on);
     });
     const titles = {
         users: ['Users', 'Shared chap-secrets'],
