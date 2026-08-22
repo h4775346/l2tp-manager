@@ -273,6 +273,35 @@ function parseUsersCsv($csvText) {
     return $users;
 }
 
+function ovpnSystemdUnit() {
+    if (is_file('/etc/openvpn/server/server.conf')) {
+        return 'openvpn-server@server';
+    }
+    return 'openvpn@server';
+}
+
+function ovpnClientCount() {
+    $raw = shell_exec('sudo cat /var/log/openvpn/status.log 2>/dev/null');
+    if (!is_string($raw) || $raw === '') {
+        return 0;
+    }
+    $in = false;
+    $n = 0;
+    foreach (preg_split("/\r\n|\n|\r/", $raw) as $line) {
+        if (strpos($line, 'Common Name,') === 0) {
+            $in = true;
+            continue;
+        }
+        if ($in && (strpos($line, 'ROUTING TABLE') === 0 || $line === 'END')) {
+            break;
+        }
+        if ($in && $line !== '') {
+            $n++;
+        }
+    }
+    return $n;
+}
+
 // Get L2TP service status
 function getServiceStatus() {
     $output = shell_exec('systemctl is-active xl2tpd 2>&1');
@@ -289,20 +318,45 @@ function getServiceStatus() {
     ];
 }
 
-// Control L2TP service (requires sudo permissions for www-data)
-function controlService($action) {
+function getOvpnServiceStatus() {
+    global $vpnCfg;
+    $unit = ovpnSystemdUnit();
+    $status = trim((string)shell_exec('systemctl is-active ' . escapeshellarg($unit) . ' 2>&1'));
+    return [
+        'status' => $status,
+        'running' => ($status === 'active'),
+        'clients' => ovpnClientCount(),
+        'unit' => $unit,
+        'port' => $vpnCfg['OVPN_PORT'] ?? '8443',
+        'proto' => $vpnCfg['OVPN_PROTO'] ?? 'tcp',
+        'radius' => $vpnCfg['OVPN_RADIUS'] ?? '10.10.30.1',
+    ];
+}
+
+// Control L2TP / OVPN service (requires sudo permissions for www-data)
+function controlService($action, $target = 'l2tp') {
     $allowed = ['start', 'stop', 'restart'];
-    if (!in_array($action, $allowed)) {
+    if (!in_array($action, $allowed, true)) {
         return ['success' => false, 'message' => 'Invalid action'];
     }
+    $units = [
+        'l2tp' => 'xl2tpd',
+        'ovpn' => ovpnSystemdUnit(),
+    ];
+    if (!isset($units[$target])) {
+        return ['success' => false, 'message' => 'Invalid service'];
+    }
+    $unit = $units[$target];
     
-    $output = shell_exec("sudo systemctl $action xl2tpd 2>&1");
-    $status = shell_exec('systemctl is-active xl2tpd 2>&1');
+    shell_exec('sudo systemctl ' . escapeshellarg($action) . ' ' . escapeshellarg($unit) . ' 2>&1');
+    $status = trim((string)shell_exec('systemctl is-active ' . escapeshellarg($unit) . ' 2>&1'));
     
     return [
-        'success' => (trim($status) === 'active' || $action === 'stop'),
+        'success' => ($status === 'active' || $action === 'stop'),
         'message' => "Service $action completed",
-        'status' => trim($status)
+        'status' => $status,
+        'target' => $target,
+        'unit' => $unit,
     ];
 }
 
@@ -649,7 +703,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['serviceAction'])) {
         header('Content-Type: application/json');
         $action = $_POST['serviceAction'] ?? '';
-        $result = controlService($action);
+        $target = $_POST['serviceTarget'] ?? 'l2tp';
+        $result = controlService($action, $target);
         echo json_encode($result);
         exit();
     }
@@ -657,7 +712,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Handle service status request
     if (isset($_POST['getServiceStatus'])) {
         header('Content-Type: application/json');
-        echo json_encode(getServiceStatus());
+        $target = $_POST['serviceTarget'] ?? 'l2tp';
+        echo json_encode($target === 'ovpn' ? getOvpnServiceStatus() : getServiceStatus());
         exit();
     }
     
@@ -1454,17 +1510,18 @@ $allRoutes = getPeerRoutes();
 </nav>
 <div class="container mt-5">
 
-    <h2 class="mb-4 text-center">Manage L2TP Users</h2>
+    <h2 class="mb-4 text-center"><?php echo (!empty($vpnCfg['OVPN_ENABLED']) && !empty($vpnCfg['L2TP_ENABLED'])) ? 'Manage VPN Users' : (!empty($vpnCfg['OVPN_ENABLED']) ? 'Manage OpenVPN Users' : 'Manage L2TP Users'); ?></h2>
     
+    <?php if (!empty($vpnCfg['L2TP_ENABLED'])): ?>
     <!-- L2TP Service Status -->
     <div class="card mb-4">
         <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-            <span><strong>🔌 L2TP Service Status</strong></span>
+            <span><strong>L2TP Service Status</strong></span>
             <div>
-                <button class="btn btn-sm btn-success" onclick="controlService('start')">▶️ Start</button>
-                <button class="btn btn-sm btn-warning" onclick="controlService('restart')">🔄 Restart</button>
-                <button class="btn btn-sm btn-danger" onclick="controlService('stop')">⏹️ Stop</button>
-                <button class="btn btn-sm btn-secondary" onclick="refreshServiceStatus()">🔃 Refresh</button>
+                <button class="btn btn-sm btn-success" onclick="controlService('start','l2tp')">Start</button>
+                <button class="btn btn-sm btn-warning" onclick="controlService('restart','l2tp')">Restart</button>
+                <button class="btn btn-sm btn-danger" onclick="controlService('stop','l2tp')">Stop</button>
+                <button class="btn btn-sm btn-secondary" onclick="refreshServiceStatus()">Refresh</button>
             </div>
         </div>
         <div class="card-body">
@@ -1481,6 +1538,46 @@ $allRoutes = getPeerRoutes();
             </div>
         </div>
     </div>
+    <?php endif; ?>
+
+    <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
+    <!-- OVPN Service Status -->
+    <div class="card mb-4">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+            <span><strong>OpenVPN Service Status</strong></span>
+            <div>
+                <button class="btn btn-sm btn-success" onclick="controlService('start','ovpn')">Start</button>
+                <button class="btn btn-sm btn-warning" onclick="controlService('restart','ovpn')">Restart</button>
+                <button class="btn btn-sm btn-danger" onclick="controlService('stop','ovpn')">Stop</button>
+                <button class="btn btn-sm btn-secondary" onclick="refreshOvpnServiceStatus()">Refresh</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row mb-2">
+                <div class="col-md-4">
+                    <strong>Status:</strong> <span id="ovpnServiceStatus" class="badge bg-secondary">Loading...</span>
+                </div>
+                <div class="col-md-4">
+                    <strong>Connected Clients:</strong> <span id="ovpnClientCount">-</span>
+                </div>
+                <div class="col-md-4">
+                    <strong>Service:</strong> <span id="ovpnUnit">openvpn@server</span>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-4">
+                    <strong>Listen:</strong> TCP <span id="ovpnPort"><?php echo sanitizeOutput($vpnCfg['OVPN_PORT'] ?? '8443'); ?></span>
+                </div>
+                <div class="col-md-4">
+                    <strong>RADIUS:</strong> <span id="ovpnRadius"><?php echo sanitizeOutput($vpnCfg['OVPN_RADIUS'] ?? '10.10.30.1'); ?></span>
+                </div>
+                <div class="col-md-4">
+                    <strong>Pool:</strong> 10.10.30.0/24 (static per user)
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
     
     <!-- Search and Export Bar -->
     <div class="row mb-3">
@@ -2902,44 +2999,78 @@ set accept=yes port=${SRV.coaPort}`;
 <script>
 // Service control functions
 function refreshServiceStatus() {
+    const badge = document.getElementById('serviceStatus');
+    if (!badge) return;
     fetch('index.php', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'getServiceStatus=1&csrf_token=' + document.querySelector('input[name="csrf_token"]').value
+        body: 'getServiceStatus=1&serviceTarget=l2tp&csrf_token=' + document.querySelector('input[name="csrf_token"]').value
     })
     .then(response => response.json())
     .then(data => {
-        const statusBadge = document.getElementById('serviceStatus');
         const tunnelCount = document.getElementById('tunnelCount');
-        
         if (data.running) {
-            statusBadge.className = 'badge bg-success';
-            statusBadge.textContent = 'Running';
+            badge.className = 'badge bg-success';
+            badge.textContent = 'Running';
         } else {
-            statusBadge.className = 'badge bg-danger';
-            statusBadge.textContent = data.status || 'Stopped';
+            badge.className = 'badge bg-danger';
+            badge.textContent = data.status || 'Stopped';
         }
-        tunnelCount.textContent = data.tunnels || 0;
+        if (tunnelCount) tunnelCount.textContent = data.tunnels || 0;
     })
     .catch(err => {
         console.error('Error fetching status:', err);
     });
 }
 
-function controlService(action) {
-    if (!confirm('Are you sure you want to ' + action + ' the L2TP service?')) {
+function refreshOvpnServiceStatus() {
+    const badge = document.getElementById('ovpnServiceStatus');
+    if (!badge) return;
+    fetch('index.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'getServiceStatus=1&serviceTarget=ovpn&csrf_token=' + document.querySelector('input[name="csrf_token"]').value
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.running) {
+            badge.className = 'badge bg-success';
+            badge.textContent = 'Running';
+        } else {
+            badge.className = 'badge bg-danger';
+            badge.textContent = data.status || 'Stopped';
+        }
+        const clients = document.getElementById('ovpnClientCount');
+        const unit = document.getElementById('ovpnUnit');
+        const port = document.getElementById('ovpnPort');
+        const radius = document.getElementById('ovpnRadius');
+        if (clients) clients.textContent = data.clients || 0;
+        if (unit && data.unit) unit.textContent = data.unit;
+        if (port && data.port) port.textContent = data.port;
+        if (radius && data.radius) radius.textContent = data.radius;
+    })
+    .catch(err => {
+        console.error('Error fetching OVPN status:', err);
+    });
+}
+
+function controlService(action, target) {
+    target = target || 'l2tp';
+    const label = target === 'ovpn' ? 'OpenVPN' : 'L2TP';
+    if (!confirm('Are you sure you want to ' + action + ' the ' + label + ' service?')) {
         return;
     }
     
     fetch('index.php', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'serviceAction=' + action + '&csrf_token=' + document.querySelector('input[name="csrf_token"]').value
+        body: 'serviceAction=' + encodeURIComponent(action) + '&serviceTarget=' + encodeURIComponent(target) + '&csrf_token=' + document.querySelector('input[name="csrf_token"]').value
     })
     .then(response => response.json())
     .then(data => {
         alert(data.message + ' - Status: ' + data.status);
-        refreshServiceStatus();
+        if (target === 'ovpn') refreshOvpnServiceStatus();
+        else refreshServiceStatus();
     })
     .catch(err => {
         alert('Error: ' + err);
@@ -2949,8 +3080,11 @@ function controlService(action) {
 // Refresh status on page load
 document.addEventListener('DOMContentLoaded', function() {
     refreshServiceStatus();
-    // Auto-refresh every 30 seconds
-    setInterval(refreshServiceStatus, 30000);
+    refreshOvpnServiceStatus();
+    setInterval(function() {
+        refreshServiceStatus();
+        refreshOvpnServiceStatus();
+    }, 30000);
 });
 </script>
 </body>
