@@ -261,8 +261,9 @@ table.users td.mono {
 .view-pane { display: none; }
 .view-pane.is-on { display: block; }
 .online-panel { padding: 8px 24px 16px; }
-.icon { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; flex: 0 0 auto; }
+.icon { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; flex: 0 0 auto; color: inherit; }
 .sidebar-link .icon, .phone-nav-item .icon { width: 18px; height: 18px; }
+.svc-name .icon { opacity: 0.85; }
 .sidebar-link, .phone-nav-item, .svc-name { gap: 8px; }
 .phone-nav-item { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 
