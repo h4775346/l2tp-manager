@@ -22,7 +22,7 @@ A powerful, web-based management interface for VPN servers with advanced per-use
 
 ## 🚀 Quick Start - One Line Installation
 
-Two all-in-one installers. Each sets up its VPN plus the shared web panel and per-user routing. They can run on the **same server, in any order, and repeatedly** — each upserts its own state key-by-key, so they never clobber each other. Run one, the other, or both.
+Two all-in-one installers plus SSTP. Each sets up its VPN plus the shared web panel. They can run on the **same server, in any order, and repeatedly** — each upserts its own state key-by-key, so they never clobber each other.
 
 **L2TP/IPSec:**
 ```bash
@@ -34,9 +34,14 @@ curl -fsSL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/all-in
 curl -fsSL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/ovpn-all-in-one-installer.sh | sudo bash
 ```
 
-## 🔀 Dual VPN: L2TP + OpenVPN
+**SSTP (TCP 4433):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sstp-all-in-one-installer.sh | sudo bash
+```
 
-The panel and user store are shared; only the transport differs. You can offer L2TP where it's allowed and OpenVPN-over-TCP where UDP/L2TP is blocked — same users, same dashboard.
+## 🔀 Triple VPN: L2TP + OpenVPN + SSTP
+
+The panel and user store are shared; only the transport differs. You can offer L2TP where it's allowed, OpenVPN-over-TCP where UDP/L2TP is blocked, and SSTP (TCP 4433) where HTTPS-like tunnels work — same users, same dashboard.
 
 ### Coexistence design
 - **Separate IP pools** so the VPNs never fight over addresses:
@@ -53,7 +58,7 @@ The panel and user store are shared; only the transport differs. You can offer L
 - **MikroTik-compatible crypto** — AES-256-CBC / SHA1, so RouterOS clients connect out of the box.
 
 ### MikroTik scripts from the panel
-Each user row has **L2TP** and **OVPN** buttons that generate ready-to-paste MikroTik scripts (interface add + RADIUS setup). Only the VPN types actually installed on the server are offered.
+Each user row has **L2TP**, **OVPN**, and **SSTP** buttons (only for VPNs actually installed) that generate ready-to-paste MikroTik scripts.
 
 ## 🛠️ Manual Installation Options
 
@@ -62,7 +67,13 @@ Each user row has **L2TP** and **OVPN** buttons that generate ready-to-paste Mik
 ```bash
 curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-l2tp-full-installer.sh | sudo bash
 ```
-This installer also records the L2TP keys into the shared `/etc/l2tp-manager/vpn.conf` (see [Dual VPN](#-dual-vpn-l2tp--openvpn)), preserving any OVPN keys already present.
+This installer also records the L2TP keys into the shared `/etc/l2tp-manager/vpn.conf` (see [Triple VPN](#-triple-vpn-l2tp--openvpn--sstp)), preserving any OVPN/SSTP keys already present.
+
+### Full SSTP Server + GUI Installation
+```bash
+curl -sL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sstp-all-in-one-installer.sh | sudo bash
+```
+Override the listen port with `SSTP_PORT=8444 sudo -E bash sstp-install.sh`. Does not replace the L2TP/OVPN panel if it is already installed.
 
 ### Full OpenVPN Server + GUI Installation
 ```bash
@@ -156,6 +167,8 @@ The advanced routing system allows you to configure custom network routes that a
 # Check L2TP service status
 sudo systemctl status strongswan
 sudo systemctl status xl2tpd
+sudo systemctl status openvpn@server
+sudo systemctl status sstpd
 
 # View current routes
 ip route show
