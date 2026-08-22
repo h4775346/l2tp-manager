@@ -16,7 +16,8 @@
   --ok: #3dcc8a;
   --danger: #f05b61;
   --warn: #f0b429;
-  --border: 1px solid rgba(255, 255, 255, 0.12);
+  --border-color: rgba(255, 255, 255, 0.12);
+  --border: 1px solid var(--border-color);
   --border-strong: 1px solid rgba(255, 255, 255, 0.18);
   --r-ctrl: 6px; --r-card: 8px; --r-shell: 10px; --sidebar: 240px;
   --font: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -47,7 +48,7 @@ a:hover { color: var(--accent-hover); }
 
 .sidebar {
   display: flex; flex-direction: column; gap: 20px;
-  background: var(--rail); border-right: var(--border-strong); padding: 20px 14px;
+  background: var(--panel); border-right: var(--border-strong); padding: 20px 14px;
 }
 
 .sidebar-brand {
@@ -72,7 +73,7 @@ a:hover { color: var(--accent-hover); }
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   min-height: 56px; padding: 0 24px; border-bottom: var(--border);
-  background: var(--rail); position: sticky; top: 0; z-index: 20;
+  background: var(--canvas); position: sticky; top: 0; z-index: 20;
 }
 
 .topbar-title {
@@ -131,7 +132,7 @@ a:hover { color: var(--accent-hover); }
 
 .badge {
   display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px;
-  border-radius: 999px; border: var(--border); background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px; border: var(--border); background: var(--raised);
   color: var(--text-2); font-size: 11px; font-weight: 510; line-height: 1;
 }
 
@@ -165,7 +166,7 @@ table.users thead th {
 }
 
 table.users td {
-  padding: 7px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 7px 12px; border-bottom: var(--border);
   color: var(--text-2); vertical-align: middle; white-space: nowrap;
 }
 
@@ -181,7 +182,7 @@ table.users td.mono {
 
 .route-chip {
   display: inline-flex; align-items: center; height: 20px; padding: 0 7px;
-  border: var(--border); border-radius: var(--r-ctrl); background: rgba(255, 255, 255, 0.03);
+  border: var(--border); border-radius: var(--r-ctrl); background: var(--surface);
   color: var(--text-3); font-family: var(--font-mono); font-size: 11px;
 }
 
@@ -248,7 +249,7 @@ table.users td.mono {
   border: var(--border) !important;
   border-radius: var(--r-shell) !important;
 }
-.modal-header, .modal-footer { border-color: rgba(255,255,255,0.08) !important; }
+.modal-header, .modal-footer { border-color: var(--border-color) !important; }
 .modal-title { color: var(--text) !important; font-weight: 590; }
 .form-control, .form-select {
   background: var(--surface) !important;
@@ -260,7 +261,10 @@ table.users td.mono {
 .view-pane { display: none; }
 .view-pane.is-on { display: block; }
 .online-panel { padding: 8px 24px 16px; }
-.phone-nav { display: none; }
+.icon { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; flex: 0 0 auto; }
+.sidebar-link .icon, .phone-nav-item .icon { width: 18px; height: 18px; }
+.sidebar-link, .phone-nav-item, .svc-name { gap: 8px; }
+.phone-nav-item { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 
 @media (max-width: 980px) {
   .sidebar-brand span { display: none; }
@@ -276,7 +280,7 @@ table.users td.mono {
     position: fixed;
     left: 0; right: 0; bottom: 0;
     z-index: 30;
-    background: var(--rail);
+    background: var(--panel);
     border-top: var(--border-strong);
     padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px));
   }
@@ -300,7 +304,7 @@ table.users td.mono {
     padding: 10px 14px 8px;
     flex-wrap: wrap;
     gap: 8px;
-    background: var(--rail);
+    background: var(--canvas);
     border-bottom: var(--border);
   }
   .topbar-title h1 { font-size: 17px; }

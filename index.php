@@ -1435,6 +1435,7 @@ $allRoutes = getPeerRoutes();
     <link href="assets/dashboard.mobile.css" rel="stylesheet">
 </head>
 <body>
+<?php echo file_get_contents(__DIR__ . '/assets/icons.svg'); ?>
 <?php
     $vpnKinds = (!empty($vpnCfg['L2TP_ENABLED']) ? 1 : 0) + (!empty($vpnCfg['OVPN_ENABLED']) ? 1 : 0) + (!empty($vpnCfg['SSTP_ENABLED']) ? 1 : 0);
     if ($vpnKinds >= 2) {
@@ -1455,8 +1456,8 @@ $allRoutes = getPeerRoutes();
 <aside class="sidebar">
     <div class="sidebar-brand">VPN Manager<span>SAS4 console</span></div>
     <nav class="sidebar-nav">
-        <a class="sidebar-link is-active" href="#users" data-view="users">Users</a>
-        <a class="sidebar-link" href="#online" data-view="online">Online</a>
+        <a class="sidebar-link is-active" href="#users" data-view="users"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>Users</a>
+        <a class="sidebar-link" href="#online" data-view="online"><svg class="icon" aria-hidden="true"><use href="#i-online"/></svg>Online</a>
     </nav>
     <div class="sidebar-foot"><?php echo (int)count($users); ?> accounts</div>
 </aside>
@@ -1467,10 +1468,10 @@ $allRoutes = getPeerRoutes();
             <p><?php echo sanitizeOutput($pageSub); ?></p>
         </div>
         <div class="topbar-actions">
-            <button class="btn btn-ghost" data-bs-toggle="modal" data-bs-target="#changePasswordModal">Password</button>
+            <button class="btn btn-ghost" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg> Password</button>
             <form method="post" action="index.php" class="d-inline">
                 <input type="hidden" name="csrf_token" value="<?php echo sanitizeOutput(generateCSRFToken()); ?>">
-                <button type="submit" name="logout" class="btn btn-danger">Sign out</button>
+                <button type="submit" name="logout" class="btn btn-danger"><svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg> Sign out</button>
             </form>
         </div>
     </header>
@@ -1480,7 +1481,7 @@ $allRoutes = getPeerRoutes();
     <?php if (!empty($vpnCfg['L2TP_ENABLED'])): ?>
     <div class="svc-card">
         <div class="svc-card-head">
-            <span class="svc-name"><span class="svc-dot" id="l2tpDot"></span>L2TP</span>
+            <span class="svc-name"><span class="svc-dot" id="l2tpDot"></span><svg class="icon" aria-hidden="true"><use href="#i-l2tp"/></svg>L2TP</span>
             <div class="svc-actions">
                 <button class="btn btn-sm" onclick="controlService('start','l2tp')">Start</button>
                 <button class="btn btn-sm" onclick="controlService('restart','l2tp')">Restart</button>
@@ -1500,7 +1501,7 @@ $allRoutes = getPeerRoutes();
     <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
     <div class="svc-card">
         <div class="svc-card-head">
-            <span class="svc-name"><span class="svc-dot" id="ovpnDot"></span>OpenVPN</span>
+            <span class="svc-name"><span class="svc-dot" id="ovpnDot"></span><svg class="icon" aria-hidden="true"><use href="#i-ovpn"/></svg>OpenVPN</span>
             <div class="svc-actions">
                 <button class="btn btn-sm" onclick="controlService('start','ovpn')">Start</button>
                 <button class="btn btn-sm" onclick="controlService('restart','ovpn')">Restart</button>
@@ -1522,7 +1523,7 @@ $allRoutes = getPeerRoutes();
     <?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>
     <div class="svc-card">
         <div class="svc-card-head">
-            <span class="svc-name"><span class="svc-dot" id="sstpDot"></span>SSTP</span>
+            <span class="svc-name"><span class="svc-dot" id="sstpDot"></span><svg class="icon" aria-hidden="true"><use href="#i-sstp"/></svg>SSTP</span>
             <div class="svc-actions">
                 <button class="btn btn-sm" onclick="controlService('start','sstp')">Start</button>
                 <button class="btn btn-sm" onclick="controlService('restart','sstp')">Restart</button>
@@ -1547,7 +1548,7 @@ $allRoutes = getPeerRoutes();
         <div class="svc-card-head" style="padding:0 0 10px">
             <span class="svc-name">Online now</span>
             <div class="svc-actions">
-                <button class="btn btn-sm" type="button" onclick="refreshOnline()">Refresh</button>
+                <button class="btn btn-sm" type="button" onclick="refreshOnline()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh</button>
             </div>
         </div>
         <div class="table-wrap" style="margin:0">
@@ -1579,7 +1580,7 @@ $allRoutes = getPeerRoutes();
         <button class="btn" data-bs-toggle="modal" data-bs-target="#importUsersModal">Import CSV</button>
         <button class="btn" onclick="exportUsers()">Export CSV</button>
         <button class="btn" onclick="toggleShowPasswords()">Passwords</button>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal">Add user</button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add user</button>
         <button class="btn" data-bs-toggle="modal" data-bs-target="#multipleUsersModal">Add many</button>
         <button class="btn" data-bs-toggle="modal" data-bs-target="#routesModal">Routes</button>
     </div>
@@ -1694,8 +1695,8 @@ $allRoutes = getPeerRoutes();
     </div><!-- .app-shell -->
 
     <nav class="phone-nav" aria-label="Phone">
-        <button type="button" class="phone-nav-item is-active" data-view="users" onclick="showView('users')">Users</button>
-        <button type="button" class="phone-nav-item" data-view="online" onclick="showView('online')">Online</button>
+        <button type="button" class="phone-nav-item is-active" data-view="users" onclick="showView('users')"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>Users</button>
+        <button type="button" class="phone-nav-item" data-view="online" onclick="showView('online')"><svg class="icon" aria-hidden="true"><use href="#i-online"/></svg>Online</button>
     </nav>
 
     <!-- Add User Modal -->
@@ -3199,7 +3200,7 @@ function refreshOnline() {
                 '<td>' + esc(s.since) + '</td>' +
                 '<td>' + esc(s.iface) + '</td>' +
                 '<td><button class="btn btn-sm btn-danger" type="button" onclick="kickSession(this)" ' +
-                'data-type="' + esc(s.type) + '" data-user="' + esc(s.user) + '" data-ip="' + esc(s.ip) + '" data-iface="' + esc(s.iface) + '">Disconnect</button></td>' +
+                'data-type="' + esc(s.type) + '" data-user="' + esc(s.user) + '" data-ip="' + esc(s.ip) + '" data-iface="' + esc(s.iface) + '"><svg class="icon" aria-hidden="true"><use href="#i-disconnect"/></svg> Disconnect</button></td>' +
                 '</tr>';
         }).join('');
     })

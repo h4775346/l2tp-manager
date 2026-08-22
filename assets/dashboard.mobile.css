@@ -135,7 +135,7 @@
     min-height: 44px;
     padding: 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    background: var(--panel);
+    background: var(--rail);
     border-top: var(--border);
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
   }
@@ -285,16 +285,16 @@
     position: sticky;
     left: 0;
     z-index: 1;
-    background: var(--panel);
-    box-shadow: 1px 0 0 rgba(255, 255, 255, 0.08);
+    background: var(--raised);
+    box-shadow: 1px 0 0 var(--border-color);
   }
 
   #view-users table.users thead th:first-child {
     z-index: 3;
     background: var(--raised);
-    }
- 
-    #view-users table.users tbody tr:hover td:first-child {
+  }
+
+  #view-users table.users tbody tr:hover td:first-child {
     background: var(--hover);
   }
 
