@@ -291,11 +291,11 @@
 
   #view-users table.users thead th:first-child {
     z-index: 3;
-    background: #141516;
-  }
-
-  #view-users table.users tbody tr:hover td:first-child {
-    background: #161718;
+    background: var(--raised);
+    }
+ 
+    #view-users table.users tbody tr:hover td:first-child {
+    background: var(--hover);
   }
 
   /* Modal: almost the full viewport */

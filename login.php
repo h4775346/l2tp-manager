@@ -72,8 +72,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             min-height: 100%;
         }
         body.login-page {
-            background: #08090a;
-            color: #f7f8f8;
+            background: var(--canvas);
+            color: var(--text);
             font-family: Inter, system-ui, sans-serif;
             font-feature-settings: "cv01", "ss03";
             display: flex;
@@ -86,8 +86,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .login-card {
             width: 380px;
             max-width: 100%;
-            background: #0f1011;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: var(--surface);
+            border: var(--border);
             border-radius: 8px;
             padding: 32px 28px 28px;
             box-sizing: border-box;
@@ -97,13 +97,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 20px;
             font-weight: 590;
             letter-spacing: -0.02em;
-            color: #f7f8f8;
+            color: var(--text);
         }
         .login-sub {
             margin: 0 0 24px;
             font-size: 13px;
             font-weight: 400;
-            color: #8a8f98;
+            color: var(--text-3);
         }
         .login-card .field {
             margin-bottom: 14px;
@@ -113,15 +113,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin-bottom: 6px;
             font-size: 12px;
             font-weight: 510;
-            color: #d0d6e0;
+            color: var(--text-2);
         }
         .login-card input[type="text"],
         .login-card input[type="password"] {
             width: 100%;
             box-sizing: border-box;
-            background: #191a1b;
-            color: #f7f8f8;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: var(--raised);
+            color: var(--text);
+            border: var(--border);
             border-radius: 6px;
             padding: 9px 12px;
             font: inherit;
