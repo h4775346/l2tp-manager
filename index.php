@@ -136,6 +136,22 @@ function readUsers($file) {
     return $users;
 }
 
+// OVPN static IP: same last octet as the chap/L2TP address (10.255.10.11 → 10.10.30.11).
+function ovpnIpFromChap($ip) {
+    if (!is_string($ip) || $ip === '' || $ip === '*') {
+        return '';
+    }
+    $parts = explode('.', $ip);
+    if (count($parts) !== 4 || !ctype_digit((string)$parts[3])) {
+        return '';
+    }
+    $last = (int)$parts[3];
+    if ($last <= 1 || $last >= 255) {
+        return '';
+    }
+    return '10.10.30.' . $last;
+}
+
 // Write the array back to the file
 function writeUsers($file, $users) {
     // Validate file path to prevent directory traversal
@@ -1497,7 +1513,10 @@ $allRoutes = getPeerRoutes();
                 <th>Username</th>
                 <th>Server</th>
                 <th>Password</th>
-                <th>IP Address</th>
+                <th><?php echo !empty($vpnCfg['OVPN_ENABLED']) ? 'L2TP IP' : 'IP Address'; ?></th>
+                <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
+                <th>OVPN IP</th>
+                <?php endif; ?>
                 <th>Routes <button class="refresh-btn" onclick="refreshAllRoutes()" title="Refresh all routes">↻</button></th>
                 <th>Actions</th>
             </tr>
@@ -1509,6 +1528,9 @@ $allRoutes = getPeerRoutes();
                     <td><?php echo sanitizeOutput($user['server']); ?></td>
                     <td><?php echo sanitizeOutput($user['secret']); ?></td>
                     <td><?php echo sanitizeOutput($user['ip']); ?></td>
+                    <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
+                    <td><code><?php echo sanitizeOutput(ovpnIpFromChap($user['ip'])); ?></code></td>
+                    <?php endif; ?>
                     <td class="routes-cell">
                         <div class="routes-content" id="routes-content-<?php echo $index; ?>">
                             <?php 
@@ -1876,6 +1898,11 @@ $allRoutes = getPeerRoutes();
 <script>
     // VPN coexistence flags + server params echoed from PHP
     const VPN = <?php echo json_encode(['l2tp' => !empty($vpnCfg['L2TP_ENABLED']), 'ovpn' => !empty($vpnCfg['OVPN_ENABLED'])]); ?>;
+    function ovpnIpFromChap(ip) {
+        const last = parseInt(String(ip || '').split('.').pop(), 10);
+        if (!last || last <= 1 || last >= 255) return '';
+        return '10.10.30.' + last;
+    }
     const SRV = <?php echo json_encode([
         'ip'         => $vpnCfg['SERVER_IP'],
         'ipsecPsk'   => $vpnCfg['L2TP_PSK'],
@@ -1968,7 +1995,8 @@ $allRoutes = getPeerRoutes();
                       <td>${client}</td>
                       <td>${server}</td>
                       <td>${secret}</td>
-                      <td>${data.ip}</td>  <!-- Use the IP returned from the server -->
+                      <td>${data.ip}</td>
+                      ${VPN.ovpn ? `<td><code>${ovpnIpFromChap(data.ip)}</code></td>` : ''}
                       <td class="routes-cell">
                         <div class="routes-content" id="routes-content-${newIndex}">
                             <div class="text-muted">No routes configured</div>
@@ -2825,7 +2853,7 @@ set accept=yes port=${SRV.coaPort}`;
             label.textContent = 'MikroTik Script — OVPN (' + u + ')';
             hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over OpenVPN.';
             text.value = buildOvpnScript(u, p);
-            note.textContent = '⚠ Over OVPN the router gets a dynamic IP from 10.10.30.0/24. After it connects, check the ovpn-client interface IP, add THAT IP in SAS → NAS with a shared secret, then set NAS_SECRET to match.';
+            note.textContent = 'OVPN IP is static: 10.10.30.<last-octet of the chap IP> (e.g. L2TP 10.255.10.11 → OVPN 10.10.30.11). Add that IP in SAS → NAS with a shared secret, then set NAS_SECRET to match. RADIUS address on the router is 10.10.30.1.';
         } else {
             label.textContent = 'MikroTik Script — L2TP (' + u + ')';
             hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over L2TP/IPsec.';

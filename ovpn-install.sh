@@ -182,6 +182,8 @@ username-as-common-name
 duplicate-cn
 script-security 2
 auth-user-pass-verify /etc/openvpn/auth.sh via-file
+tmp-dir /etc/openvpn/tmp
+client-connect /etc/openvpn/client-connect.sh
 user nobody
 group www-data
 status /var/log/openvpn/status.log
@@ -208,6 +210,39 @@ EOF'
 sudo chmod 755 /etc/openvpn/auth.sh
 
 echo -e "${GREEN}✅ auth.sh installed${NC}"
+echo ""
+
+# ---------------------------------------------------------------------------
+# client-connect: static OVPN IP per chap-secrets user (same last octet).
+# nobody must be able to write the tmp client-config file OpenVPN hands it.
+# ---------------------------------------------------------------------------
+echo -e "${CYAN}📌 Writing /etc/openvpn/client-connect.sh (static IPs)...${NC}"
+sudo mkdir -p /etc/openvpn/tmp
+sudo chown nobody:www-data /etc/openvpn/tmp
+sudo chmod 770 /etc/openvpn/tmp
+sudo bash -c 'cat > /etc/openvpn/client-connect.sh <<'"'"'EOF'"'"'
+#!/bin/bash
+# Push a static OVPN IP from chap-secrets (same last octet as L2TP).
+# 10.10.30.x / 10.255.10.x / other a.b.c.x -> 10.10.30.x  (skip .0/.1/.255)
+CONF="${1:-}"
+u="${username:-${common_name:-}}"
+[ -z "$CONF" ] || [ -z "$u" ] && exit 0
+CHAP="/etc/ppp/chap-secrets"
+ip=$(awk -v u="$u" '"'"'$1==u {print $4; exit}'"'"' "$CHAP")
+[ -z "$ip" ] && exit 0
+last="${ip##*.}"
+case "$last" in
+  '"'"''"'"'|*[!0-9]*) exit 0 ;;
+esac
+if [ "$last" -le 1 ] || [ "$last" -ge 255 ]; then
+  exit 0
+fi
+echo "ifconfig-push 10.10.30.${last} 255.255.255.0" > "$CONF"
+exit 0
+EOF'
+sudo chmod 755 /etc/openvpn/client-connect.sh
+
+echo -e "${GREEN}✅ client-connect.sh installed (user1 → 10.10.30.11, …)${NC}"
 echo ""
 
 # ---------------------------------------------------------------------------

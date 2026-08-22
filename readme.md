@@ -42,6 +42,7 @@ The panel and user store are shared; only the transport differs. You can offer L
 - **Separate IP pools** so the two VPNs never fight over addresses:
   - **L2TP** — pool `10.255.0.0/16`, local gateway `10.255.10.10`
   - **OVPN** — pool `10.10.30.0/24`, local gateway `10.10.30.1`
+- **Static OVPN IPs** — `client-connect` maps each chap-secrets user to `10.10.30.<last-octet>` (L2TP `10.255.10.11` → OVPN `10.10.30.11`). Add that IP in SAS → NAS. RADIUS on the MikroTik stays `10.10.30.1`.
 - **One shared user store** — both VPNs authenticate against `/etc/ppp/chap-secrets`. Add a user once; they can connect over either transport.
 - **Shared state file** `/etc/l2tp-manager/vpn.conf` — each installer **upserts keys one at a time** (never rewrites the whole file), so running the OVPN installer keeps the L2TP keys and vice-versa. The panel reads this file to know which VPNs are live and only shows buttons for the installed ones.
 
