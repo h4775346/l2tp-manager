@@ -1405,297 +1405,139 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $allRoutes = getPeerRoutes();
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Manage L2TP Users</title>
-    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <title>VPN Manager</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-            }
-            to {
-                opacity: 1;
-            }
-        }
-
-        @keyframes fadeOut {
-            from {
-                opacity: 1;
-            }
-            to {
-                opacity: 0;
-            }
-        }
-
-        .fade-in {
-            animation: fadeIn 0.5s;
-        }
-
-        .fade-out {
-            animation: fadeOut 0.5s;
-        }
-
-        .table-responsive {
-            overflow-x: auto;
-        }
-        
-        .routes-cell {
-            text-align: left;
-            max-width: 250px;
-            word-wrap: break-word;
-            font-size: 0.85em;
-            position: relative;
-        }
-        
-        .routes-content {
-            max-height: 100px;
-            overflow-y: auto;
-            padding: 8px;
-            background-color: #f8f9fa;
-            border-radius: 4px;
-            margin-bottom: 8px;
-            font-family: monospace;
-        }
-        
-        .route-actions {
-            display: flex;
-            gap: 5px;
-            flex-wrap: wrap;
-        }
-        
-        .route-item {
-            background-color: #e9ecef;
-            padding: 4px 8px;
-            margin: 2px 0;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .route-text {
-            flex-grow: 1;
-            word-break: break-all;
-        }
-        
-        .route-delete-btn {
-            margin-left: 5px;
-            padding: 0 5px;
-            font-size: 0.8em;
-        }
-        
-        .user-actions {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        
-        .table th {
-            background-color: #343a40;
-            color: white;
-        }
-        
-        .table-hover tbody tr:hover {
-            background-color: rgba(0,0,0,.075);
-        }
-        
-        .btn-sm {
-            font-size: 0.75rem;
-            padding: 0.25rem 0.5rem;
-        }
-        
-        .refresh-btn {
-            background-color: #6c757d;
-            border: none;
-            color: white;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-        }
-        
-        .refresh-btn:hover {
-            background-color: #5a6268;
-        }
-    </style>
+    <link href="assets/dashboard.css" rel="stylesheet">
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="#">VPN User Manager</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav ms-auto">
-                <li class="nav-item">
-                    <button class="btn btn-primary nav-link" data-bs-toggle="modal" data-bs-target="#changePasswordModal">Change Password</button>
-                </li>
-                <li class="nav-item">
-                    <form method="post" action="index.php" class="d-inline">
-                        <input type="hidden" name="csrf_token" value="<?php echo sanitizeOutput(generateCSRFToken()); ?>">
-                        <button type="submit" name="logout" class="btn btn-danger nav-link">Logout</button>
-                    </form>
-                </li>
-            </ul>
+<?php
+    $vpnKinds = (!empty($vpnCfg['L2TP_ENABLED']) ? 1 : 0) + (!empty($vpnCfg['OVPN_ENABLED']) ? 1 : 0) + (!empty($vpnCfg['SSTP_ENABLED']) ? 1 : 0);
+    if ($vpnKinds >= 2) {
+        $pageTitle = 'Users';
+        $pageSub = 'Shared chap-secrets · L2TP / OVPN / SSTP';
+    } elseif (!empty($vpnCfg['OVPN_ENABLED'])) {
+        $pageTitle = 'OpenVPN users';
+        $pageSub = 'Shared chap-secrets';
+    } elseif (!empty($vpnCfg['SSTP_ENABLED'])) {
+        $pageTitle = 'SSTP users';
+        $pageSub = 'Shared chap-secrets';
+    } else {
+        $pageTitle = 'L2TP users';
+        $pageSub = 'Shared chap-secrets';
+    }
+?>
+<div class="app-shell">
+<aside class="sidebar">
+    <div class="sidebar-brand">VPN Manager<span>SAS4 console</span></div>
+    <nav class="sidebar-nav">
+        <a class="sidebar-link is-active" href="#users">Users</a>
+        <a class="sidebar-link" href="#services">Services</a>
+    </nav>
+    <div class="sidebar-foot"><?php echo (int)count($users); ?> accounts</div>
+</aside>
+<div class="main">
+    <header class="topbar">
+        <div class="topbar-title">
+            <h1><?php echo sanitizeOutput($pageTitle); ?></h1>
+            <p><?php echo sanitizeOutput($pageSub); ?></p>
         </div>
-    </div>
-</nav>
-<div class="container mt-5">
-
-    <?php
-        $vpnKinds = (!empty($vpnCfg['L2TP_ENABLED']) ? 1 : 0) + (!empty($vpnCfg['OVPN_ENABLED']) ? 1 : 0) + (!empty($vpnCfg['SSTP_ENABLED']) ? 1 : 0);
-        if ($vpnKinds >= 2) {
-            $pageTitle = 'Manage VPN Users';
-        } elseif (!empty($vpnCfg['OVPN_ENABLED'])) {
-            $pageTitle = 'Manage OpenVPN Users';
-        } elseif (!empty($vpnCfg['SSTP_ENABLED'])) {
-            $pageTitle = 'Manage SSTP Users';
-        } else {
-            $pageTitle = 'Manage L2TP Users';
-        }
-    ?>
-    <h2 class="mb-4 text-center"><?php echo $pageTitle; ?></h2>
+        <div class="topbar-actions">
+            <button class="btn btn-ghost" data-bs-toggle="modal" data-bs-target="#changePasswordModal">Password</button>
+            <form method="post" action="index.php" class="d-inline">
+                <input type="hidden" name="csrf_token" value="<?php echo sanitizeOutput(generateCSRFToken()); ?>">
+                <button type="submit" name="logout" class="btn btn-danger">Sign out</button>
+            </form>
+        </div>
+    </header>
+    <div class="content">
+    <div class="status-rail" id="services">
     
     <?php if (!empty($vpnCfg['L2TP_ENABLED'])): ?>
-    <!-- L2TP Service Status -->
-    <div class="card mb-4">
-        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-            <span><strong>L2TP Service Status</strong></span>
-            <div>
-                <button class="btn btn-sm btn-success" onclick="controlService('start','l2tp')">Start</button>
-                <button class="btn btn-sm btn-warning" onclick="controlService('restart','l2tp')">Restart</button>
+    <div class="svc-card">
+        <div class="svc-card-head">
+            <span class="svc-name"><span class="svc-dot" id="l2tpDot"></span>L2TP</span>
+            <div class="svc-actions">
+                <button class="btn btn-sm" onclick="controlService('start','l2tp')">Start</button>
+                <button class="btn btn-sm" onclick="controlService('restart','l2tp')">Restart</button>
                 <button class="btn btn-sm btn-danger" onclick="controlService('stop','l2tp')">Stop</button>
-                <button class="btn btn-sm btn-secondary" onclick="refreshServiceStatus()">Refresh</button>
+                <button class="btn btn-sm" onclick="refreshServiceStatus()">Refresh</button>
             </div>
         </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-4">
-                    <strong>Status:</strong> <span id="serviceStatus" class="badge bg-secondary">Loading...</span>
-                </div>
-                <div class="col-md-4">
-                    <strong>Connected Tunnels:</strong> <span id="tunnelCount">-</span>
-                </div>
-                <div class="col-md-4">
-                    <strong>Service:</strong> xl2tpd
-                </div>
-            </div>
+        <div class="svc-card-meta">
+            <div>Status <strong id="serviceStatus">…</strong></div>
+            <div>Tunnels <strong id="tunnelCount">-</strong></div>
+            <div>Unit <strong>xl2tpd</strong></div>
+            <div>RADIUS <strong>10.255.10.10</strong></div>
         </div>
     </div>
     <?php endif; ?>
 
     <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
-    <!-- OVPN Service Status -->
-    <div class="card mb-4">
-        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-            <span><strong>OpenVPN Service Status</strong></span>
-            <div>
-                <button class="btn btn-sm btn-success" onclick="controlService('start','ovpn')">Start</button>
-                <button class="btn btn-sm btn-warning" onclick="controlService('restart','ovpn')">Restart</button>
+    <div class="svc-card">
+        <div class="svc-card-head">
+            <span class="svc-name"><span class="svc-dot" id="ovpnDot"></span>OpenVPN</span>
+            <div class="svc-actions">
+                <button class="btn btn-sm" onclick="controlService('start','ovpn')">Start</button>
+                <button class="btn btn-sm" onclick="controlService('restart','ovpn')">Restart</button>
                 <button class="btn btn-sm btn-danger" onclick="controlService('stop','ovpn')">Stop</button>
-                <button class="btn btn-sm btn-secondary" onclick="refreshOvpnServiceStatus()">Refresh</button>
+                <button class="btn btn-sm" onclick="refreshOvpnServiceStatus()">Refresh</button>
             </div>
         </div>
-        <div class="card-body">
-            <div class="row mb-2">
-                <div class="col-md-4">
-                    <strong>Status:</strong> <span id="ovpnServiceStatus" class="badge bg-secondary">Loading...</span>
-                </div>
-                <div class="col-md-4">
-                    <strong>Connected Clients:</strong> <span id="ovpnClientCount">-</span>
-                </div>
-                <div class="col-md-4">
-                    <strong>Service:</strong> <span id="ovpnUnit">openvpn@server</span>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-4">
-                    <strong>Listen:</strong> TCP <span id="ovpnPort"><?php echo sanitizeOutput($vpnCfg['OVPN_PORT'] ?? '8443'); ?></span>
-                </div>
-                <div class="col-md-4">
-                    <strong>RADIUS:</strong> <span id="ovpnRadius"><?php echo sanitizeOutput($vpnCfg['OVPN_RADIUS'] ?? '10.10.30.1'); ?></span>
-                </div>
-                <div class="col-md-4">
-                    <strong>Pool:</strong> 10.10.30.0/24 (static per user)
-                </div>
-            </div>
+        <div class="svc-card-meta">
+            <div>Status <strong id="ovpnServiceStatus">…</strong></div>
+            <div>Clients <strong id="ovpnClientCount">-</strong></div>
+            <div>Unit <strong id="ovpnUnit">openvpn@server</strong></div>
+            <div>Listen <strong>TCP <span id="ovpnPort"><?php echo sanitizeOutput($vpnCfg['OVPN_PORT'] ?? '8443'); ?></span></strong></div>
+            <div>RADIUS <strong id="ovpnRadius"><?php echo sanitizeOutput($vpnCfg['OVPN_RADIUS'] ?? '10.10.30.1'); ?></strong></div>
+            <div>Pool <strong>10.10.30.0/24</strong></div>
         </div>
     </div>
     <?php endif; ?>
 
     <?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>
-    <!-- SSTP Service Status -->
-    <div class="card mb-4">
-        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-            <span><strong>SSTP Service Status</strong></span>
-            <div>
-                <button class="btn btn-sm btn-success" onclick="controlService('start','sstp')">Start</button>
-                <button class="btn btn-sm btn-warning" onclick="controlService('restart','sstp')">Restart</button>
+    <div class="svc-card">
+        <div class="svc-card-head">
+            <span class="svc-name"><span class="svc-dot" id="sstpDot"></span>SSTP</span>
+            <div class="svc-actions">
+                <button class="btn btn-sm" onclick="controlService('start','sstp')">Start</button>
+                <button class="btn btn-sm" onclick="controlService('restart','sstp')">Restart</button>
                 <button class="btn btn-sm btn-danger" onclick="controlService('stop','sstp')">Stop</button>
-                <button class="btn btn-sm btn-secondary" onclick="refreshSstpServiceStatus()">Refresh</button>
+                <button class="btn btn-sm" onclick="refreshSstpServiceStatus()">Refresh</button>
             </div>
         </div>
-        <div class="card-body">
-            <div class="row mb-2">
-                <div class="col-md-4">
-                    <strong>Status:</strong> <span id="sstpServiceStatus" class="badge bg-secondary">Loading...</span>
-                </div>
-                <div class="col-md-4">
-                    <strong>PPP Tunnels:</strong> <span id="sstpTunnelCount">-</span>
-                </div>
-                <div class="col-md-4">
-                    <strong>Service:</strong> sstpd
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-4">
-                    <strong>Listen:</strong> TCP <span id="sstpPort"><?php echo sanitizeOutput($vpnCfg['SSTP_PORT'] ?? '4433'); ?></span>
-                </div>
-                <div class="col-md-4">
-                    <strong>RADIUS:</strong> <span id="sstpRadius"><?php echo sanitizeOutput($vpnCfg['SSTP_RADIUS'] ?? '10.200.10.1'); ?></span>
-                </div>
-                <div class="col-md-4">
-                    <strong>Pool:</strong> 10.200.10.0/24 (static per user)
-                </div>
-            </div>
+        <div class="svc-card-meta">
+            <div>Status <strong id="sstpServiceStatus">…</strong></div>
+            <div>PPP <strong id="sstpTunnelCount">-</strong></div>
+            <div>Unit <strong>sstpd</strong></div>
+            <div>Listen <strong>TCP <span id="sstpPort"><?php echo sanitizeOutput($vpnCfg['SSTP_PORT'] ?? '4433'); ?></span></strong></div>
+            <div>RADIUS <strong id="sstpRadius"><?php echo sanitizeOutput($vpnCfg['SSTP_RADIUS'] ?? '10.200.10.1'); ?></strong></div>
+            <div>Pool <strong>10.200.10.0/24</strong></div>
         </div>
     </div>
     <?php endif; ?>
-    
-    <!-- Search and Export Bar -->
-    <div class="row mb-3">
-        <div class="col-md-6">
-            <div class="input-group">
-                <span class="input-group-text"><i class="bi bi-search">🔍</i></span>
-                <input type="text" class="form-control" id="userSearch" placeholder="Search users by username, IP, or password..." onkeyup="filterUsers()">
-                <button class="btn btn-outline-secondary" type="button" onclick="clearSearch()">Clear</button>
-            </div>
-        </div>
-        <div class="col-md-6 text-end">
-            <span class="text-muted me-3">Total: <strong id="userCount"><?php echo count($users); ?></strong> users</span>
-            <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#importUsersModal">📤 Import CSV</button>
-            <button class="btn btn-outline-success" onclick="exportUsers()">📥 Export CSV</button>
-            <button class="btn btn-outline-info" onclick="toggleShowPasswords()">👁️ Toggle Passwords</button>
-        </div>
     </div>
-    
-    <!-- Pagination Info -->
-    <div class="row mb-2">
-        <div class="col-12">
-            <small class="text-muted">Showing <span id="showingCount"><?php echo count($users); ?></span> of <?php echo count($users); ?> users</small>
-        </div>
+
+    <div class="toolbar" id="users">
+        <input type="text" class="search" id="userSearch" placeholder="Search username, IP, password…" onkeyup="filterUsers()">
+        <button class="btn" type="button" onclick="clearSearch()">Clear</button>
+        <span class="badge badge-muted"><strong id="userCount"><?php echo count($users); ?></strong> users · <span id="showingCount"><?php echo count($users); ?></span> shown</span>
+        <button class="btn" data-bs-toggle="modal" data-bs-target="#importUsersModal">Import CSV</button>
+        <button class="btn" onclick="exportUsers()">Export CSV</button>
+        <button class="btn" onclick="toggleShowPasswords()">Passwords</button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal">Add user</button>
+        <button class="btn" data-bs-toggle="modal" data-bs-target="#multipleUsersModal">Add many</button>
+        <button class="btn" data-bs-toggle="modal" data-bs-target="#routesModal">Routes</button>
     </div>
-    
-    <div class="table-responsive">
-        <table class="table table-hover table-bordered text-center">
-            <thead class="table-dark">
+
+    <div class="table-wrap">
+        <table class="users">
+            <thead>
             <tr>
                 <th>Username</th>
                 <th>Server</th>
@@ -1797,11 +1639,9 @@ $allRoutes = getPeerRoutes();
             </tbody>
         </table>
     </div>
-    <div class="d-flex justify-content-center flex-wrap">
-        <button class="btn btn-success me-2 mb-2" data-bs-toggle="modal" data-bs-target="#userModal">Add User</button>
-        <button class="btn btn-secondary mb-2" data-bs-toggle="modal" data-bs-target="#multipleUsersModal">Add Multiple Users</button>
-        <button class="btn btn-info mb-2 ms-2" data-bs-toggle="modal" data-bs-target="#routesModal">Manage Routes</button>
-    </div>
+    </div><!-- .content -->
+    </div><!-- .main -->
+    </div><!-- .app-shell -->
 
     <!-- Add User Modal -->
     <div class="modal fade" id="userModal" tabindex="-1" aria-labelledby="userModalLabel" aria-hidden="true">
@@ -3141,13 +2981,15 @@ function refreshServiceStatus() {
     .then(data => {
         const tunnelCount = document.getElementById('tunnelCount');
         if (data.running) {
-            badge.className = 'badge bg-success';
+            badge.className = 'badge badge-up';
             badge.textContent = 'Running';
         } else {
-            badge.className = 'badge bg-danger';
+            badge.className = 'badge badge-down';
             badge.textContent = data.status || 'Stopped';
         }
         if (tunnelCount) tunnelCount.textContent = data.tunnels || 0;
+        const l2tpDot = document.getElementById('l2tpDot');
+        if (l2tpDot) l2tpDot.className = 'svc-dot ' + (data.running ? 'is-up' : 'is-down');
     })
     .catch(err => {
         console.error('Error fetching status:', err);
@@ -3165,10 +3007,10 @@ function refreshOvpnServiceStatus() {
     .then(response => response.json())
     .then(data => {
         if (data.running) {
-            badge.className = 'badge bg-success';
+            badge.className = 'badge badge-up';
             badge.textContent = 'Running';
         } else {
-            badge.className = 'badge bg-danger';
+            badge.className = 'badge badge-down';
             badge.textContent = data.status || 'Stopped';
         }
         const clients = document.getElementById('ovpnClientCount');
@@ -3179,6 +3021,8 @@ function refreshOvpnServiceStatus() {
         if (unit && data.unit) unit.textContent = data.unit;
         if (port && data.port) port.textContent = data.port;
         if (radius && data.radius) radius.textContent = data.radius;
+        const ovpnDot = document.getElementById('ovpnDot');
+        if (ovpnDot) ovpnDot.className = 'svc-dot ' + (data.running ? 'is-up' : 'is-down');
     })
     .catch(err => {
         console.error('Error fetching OVPN status:', err);
@@ -3196,10 +3040,10 @@ function refreshSstpServiceStatus() {
     .then(response => response.json())
     .then(data => {
         if (data.running) {
-            badge.className = 'badge bg-success';
+            badge.className = 'badge badge-up';
             badge.textContent = 'Running';
         } else {
-            badge.className = 'badge bg-danger';
+            badge.className = 'badge badge-down';
             badge.textContent = data.status || 'Stopped';
         }
         const tunnels = document.getElementById('sstpTunnelCount');
@@ -3208,6 +3052,8 @@ function refreshSstpServiceStatus() {
         if (tunnels) tunnels.textContent = data.tunnels || 0;
         if (port && data.port) port.textContent = data.port;
         if (radius && data.radius) radius.textContent = data.radius;
+        const sstpDot = document.getElementById('sstpDot');
+        if (sstpDot) sstpDot.className = 'svc-dot ' + (data.running ? 'is-up' : 'is-down');
     })
     .catch(err => {
         console.error('Error fetching SSTP status:', err);

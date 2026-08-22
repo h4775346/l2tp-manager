@@ -57,39 +57,111 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 ?>
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Login</title>
-    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Manager · Sign in</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;510;590&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/dashboard.css">
+    <style>
+        html, body.login-page {
+            margin: 0;
+            min-height: 100%;
+        }
+        body.login-page {
+            background: #08090a;
+            color: #f7f8f8;
+            font-family: Inter, system-ui, sans-serif;
+            font-feature-settings: "cv01", "ss03";
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 24px;
+            box-sizing: border-box;
+        }
+        .login-card {
+            width: 380px;
+            max-width: 100%;
+            background: #0f1011;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 32px 28px 28px;
+            box-sizing: border-box;
+        }
+        .login-wordmark {
+            margin: 0 0 4px;
+            font-size: 20px;
+            font-weight: 590;
+            letter-spacing: -0.02em;
+            color: #f7f8f8;
+        }
+        .login-sub {
+            margin: 0 0 24px;
+            font-size: 13px;
+            font-weight: 400;
+            color: #8a8f98;
+        }
+        .login-card .field {
+            margin-bottom: 14px;
+        }
+        .login-card label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 12px;
+            font-weight: 510;
+            color: #d0d6e0;
+        }
+        .login-card input[type="text"],
+        .login-card input[type="password"] {
+            width: 100%;
+            box-sizing: border-box;
+            background: #191a1b;
+            color: #f7f8f8;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            padding: 9px 12px;
+            font: inherit;
+            font-size: 14px;
+        }
+        .login-card input:focus {
+            outline: none;
+            border-color: #7170ff;
+        }
+        .login-card .btn.btn-primary {
+            width: 100%;
+            margin-top: 8px;
+        }
+        .login-card .alert {
+            margin: 0 0 16px;
+        }
+    </style>
 </head>
-<body>
-<div class="container mt-5">
-    <div class="row justify-content-center">
-        <div class="col-md-4">
-            <h2 class="text-center mb-4">Login</h2>
-            <?php if (!empty($error)): ?>
-                <div class="alert alert-danger"><?php echo sanitizeOutput($error); ?></div>
-            <?php endif; ?>
-            <?php if (isset($_GET['expired'])): ?>
-                <div class="alert alert-warning"><?php echo sanitizeOutput('Your session has expired. Please login again.'); ?></div>
-            <?php endif; ?>
-            <form method="post" action="login.php">
-                <input type="hidden" name="csrf_token" value="<?php echo sanitizeOutput(generateCSRFToken()); ?>">
-                <div class="mb-3">
-                    <label for="username" class="form-label">Username</label>
-                    <input type="text" class="form-control" id="username" name="username" required placeholder="Enter username" autocomplete="username">
-                </div>
-                <div class="mb-3">
-                    <label for="password" class="form-label">Password</label>
-                    <input type="password" class="form-control" id="password" name="password" required placeholder="Enter password" autocomplete="current-password">
-                </div>
-                <button type="submit" class="btn btn-primary w-100">Login</button>
-            </form>
-        </div>
-    </div>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+<body class="login-page">
+    <main class="login-card">
+        <h1 class="login-wordmark">VPN Manager</h1>
+        <p class="login-sub">Sign in to continue</p>
+        <?php if (!empty($error)): ?>
+            <div class="alert alert-error"><?php echo sanitizeOutput($error); ?></div>
+        <?php endif; ?>
+        <?php if (isset($_GET['expired'])): ?>
+            <div class="alert alert-warn"><?php echo sanitizeOutput('Your session has expired. Please login again.'); ?></div>
+        <?php endif; ?>
+        <form method="post" action="login.php">
+            <input type="hidden" name="csrf_token" value="<?php echo sanitizeOutput(generateCSRFToken()); ?>">
+            <div class="field">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autocomplete="username">
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
+            </div>
+            <button type="submit" class="btn btn-primary">Sign in</button>
+        </form>
+    </main>
 </body>
 </html>
