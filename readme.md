@@ -5,13 +5,13 @@
 
 A powerful, web-based management interface for VPN servers with advanced per-user routing capabilities. Simplify your VPN user management with an intuitive dashboard and granular network control.
 
-**Now dual-VPN:** the same panel manages **both L2TP/IPSec and OpenVPN-over-TCP** from one place (`/l2tp-manager`), backed by **one shared user store** (`/etc/ppp/chap-secrets`). Install either or both VPNs on the same server — in any order, repeatedly — without breaking the other.
+**Now triple-VPN:** the same panel manages **L2TP/IPSec, OpenVPN-over-TCP, and SSTP** from one place (`/l2tp-manager`), backed by **one shared user store** (`/etc/ppp/chap-secrets`). Install any combination on the same server — in any order, repeatedly — without breaking the others.
 
 ## 🌟 Key Features
 
 - **🔐 Secure Web Interface** - Manage users through HTTPS with modern authentication
-- **🔀 Dual VPN** - L2TP/IPSec **and** OpenVPN-over-TCP from a single panel
-- **👥 Shared User Store** - One `/etc/ppp/chap-secrets` serves both L2TP and OVPN
+- **🔀 Triple VPN** - L2TP/IPSec, OpenVPN-over-TCP, **and SSTP** from a single panel
+- **👥 Shared User Store** - One `/etc/ppp/chap-secrets` serves L2TP, OVPN, and SSTP
 - **📤 CSV Import / 📥 Export** - Bulk import users (merge / upsert / replace) from the same CSV the panel exports
 - **🛣️ Per-User Routing** - Assign custom routes to individual VPN users
 - **⚡ One-Click Installation** - Deploy everything with a single command
@@ -39,11 +39,12 @@ curl -fsSL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/ovpn-a
 The panel and user store are shared; only the transport differs. You can offer L2TP where it's allowed and OpenVPN-over-TCP where UDP/L2TP is blocked — same users, same dashboard.
 
 ### Coexistence design
-- **Separate IP pools** so the two VPNs never fight over addresses:
+- **Separate IP pools** so the VPNs never fight over addresses:
   - **L2TP** — pool `10.255.0.0/16`, local gateway `10.255.10.10`
   - **OVPN** — pool `10.10.30.0/24`, local gateway `10.10.30.1`
-- **Static OVPN IPs** — `client-connect` maps each chap-secrets user to `10.10.30.<last-octet>` (L2TP `10.255.10.11` → OVPN `10.10.30.11`). Add that IP in SAS → NAS. RADIUS on the MikroTik stays `10.10.30.1`.
-- **One shared user store** — both VPNs authenticate against `/etc/ppp/chap-secrets`. Add a user once; they can connect over either transport.
+  - **SSTP** — pool `10.200.10.0/24`, local gateway `10.200.10.1` (TCP **4433**)
+- **Static OVPN / SSTP IPs** — last octet of the chap/L2TP address: `10.255.10.11` → OVPN `10.10.30.11`, SSTP `10.200.10.11`. Add those IPs in SAS → NAS.
+- **One shared user store** — all three VPNs authenticate against `/etc/ppp/chap-secrets`. Add a user once; they can connect over any installed transport.
 - **Shared state file** `/etc/l2tp-manager/vpn.conf` — each installer **upserts keys one at a time** (never rewrites the whole file), so running the OVPN installer keeps the L2TP keys and vice-versa. The panel reads this file to know which VPNs are live and only shows buttons for the installed ones.
 
 ### OpenVPN specifics

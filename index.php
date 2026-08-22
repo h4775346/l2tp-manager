@@ -152,6 +152,21 @@ function ovpnIpFromChap($ip) {
     return '10.10.30.' . $last;
 }
 
+function sstpIpFromChap($ip) {
+    if (!is_string($ip) || $ip === '' || $ip === '*') {
+        return '';
+    }
+    $parts = explode('.', $ip);
+    if (count($parts) !== 4 || !ctype_digit((string)$parts[3])) {
+        return '';
+    }
+    $last = (int)$parts[3];
+    if ($last <= 1 || $last >= 255) {
+        return '';
+    }
+    return '10.200.10.' . $last;
+}
+
 // Write the array back to the file
 function writeUsers($file, $users) {
     // Validate file path to prevent directory traversal
@@ -318,6 +333,20 @@ function getServiceStatus() {
     ];
 }
 
+function getSstpServiceStatus() {
+    global $vpnCfg;
+    $status = trim((string)shell_exec('systemctl is-active sstpd 2>&1'));
+    $tunnels = shell_exec('ip addr show 2>/dev/null | grep -c ppp || echo 0');
+    return [
+        'status' => $status,
+        'running' => ($status === 'active'),
+        'tunnels' => (int)trim((string)$tunnels),
+        'unit' => 'sstpd',
+        'port' => $vpnCfg['SSTP_PORT'] ?? '4433',
+        'radius' => $vpnCfg['SSTP_RADIUS'] ?? '10.200.10.1',
+    ];
+}
+
 function getOvpnServiceStatus() {
     global $vpnCfg;
     $unit = ovpnSystemdUnit();
@@ -342,6 +371,7 @@ function controlService($action, $target = 'l2tp') {
     $units = [
         'l2tp' => 'xl2tpd',
         'ovpn' => ovpnSystemdUnit(),
+        'sstp' => 'sstpd',
     ];
     if (!isset($units[$target])) {
         return ['success' => false, 'message' => 'Invalid service'];
@@ -672,7 +702,16 @@ $vpnCfg += [
     'OVPN_PORT'    => '8443',
     'OVPN_PROTO'   => 'tcp',
     'OVPN_RADIUS'  => '10.10.30.1',
+    'SSTP_ENABLED' => '0',
+    'SSTP_PORT'    => '4433',
+    'SSTP_RADIUS'  => '10.200.10.1',
 ];
+if (empty($vpnCfg['SSTP_ENABLED'])) {
+    $sstpActive = trim((string)@shell_exec('systemctl is-active sstpd 2>/dev/null'));
+    if ($sstpActive === 'active' || is_file('/etc/systemd/system/sstpd.service')) {
+        $vpnCfg['SSTP_ENABLED'] = '1';
+    }
+}
 
 // Resolve per-router RADIUS shared secrets from the SAS DB (never fatal).
 $nasSecrets = [];
@@ -713,7 +752,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['getServiceStatus'])) {
         header('Content-Type: application/json');
         $target = $_POST['serviceTarget'] ?? 'l2tp';
-        echo json_encode($target === 'ovpn' ? getOvpnServiceStatus() : getServiceStatus());
+        echo json_encode($target === 'ovpn' ? getOvpnServiceStatus() : ($target === 'sstp' ? getSstpServiceStatus() : getServiceStatus()));
         exit();
     }
     
@@ -1489,7 +1528,7 @@ $allRoutes = getPeerRoutes();
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
     <div class="container-fluid">
-        <a class="navbar-brand" href="#">L2TP User Manager</a>
+        <a class="navbar-brand" href="#">VPN User Manager</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -1510,7 +1549,19 @@ $allRoutes = getPeerRoutes();
 </nav>
 <div class="container mt-5">
 
-    <h2 class="mb-4 text-center"><?php echo (!empty($vpnCfg['OVPN_ENABLED']) && !empty($vpnCfg['L2TP_ENABLED'])) ? 'Manage VPN Users' : (!empty($vpnCfg['OVPN_ENABLED']) ? 'Manage OpenVPN Users' : 'Manage L2TP Users'); ?></h2>
+    <?php
+        $vpnKinds = (!empty($vpnCfg['L2TP_ENABLED']) ? 1 : 0) + (!empty($vpnCfg['OVPN_ENABLED']) ? 1 : 0) + (!empty($vpnCfg['SSTP_ENABLED']) ? 1 : 0);
+        if ($vpnKinds >= 2) {
+            $pageTitle = 'Manage VPN Users';
+        } elseif (!empty($vpnCfg['OVPN_ENABLED'])) {
+            $pageTitle = 'Manage OpenVPN Users';
+        } elseif (!empty($vpnCfg['SSTP_ENABLED'])) {
+            $pageTitle = 'Manage SSTP Users';
+        } else {
+            $pageTitle = 'Manage L2TP Users';
+        }
+    ?>
+    <h2 class="mb-4 text-center"><?php echo $pageTitle; ?></h2>
     
     <?php if (!empty($vpnCfg['L2TP_ENABLED'])): ?>
     <!-- L2TP Service Status -->
@@ -1578,6 +1629,45 @@ $allRoutes = getPeerRoutes();
         </div>
     </div>
     <?php endif; ?>
+
+    <?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>
+    <!-- SSTP Service Status -->
+    <div class="card mb-4">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+            <span><strong>SSTP Service Status</strong></span>
+            <div>
+                <button class="btn btn-sm btn-success" onclick="controlService('start','sstp')">Start</button>
+                <button class="btn btn-sm btn-warning" onclick="controlService('restart','sstp')">Restart</button>
+                <button class="btn btn-sm btn-danger" onclick="controlService('stop','sstp')">Stop</button>
+                <button class="btn btn-sm btn-secondary" onclick="refreshSstpServiceStatus()">Refresh</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row mb-2">
+                <div class="col-md-4">
+                    <strong>Status:</strong> <span id="sstpServiceStatus" class="badge bg-secondary">Loading...</span>
+                </div>
+                <div class="col-md-4">
+                    <strong>PPP Tunnels:</strong> <span id="sstpTunnelCount">-</span>
+                </div>
+                <div class="col-md-4">
+                    <strong>Service:</strong> sstpd
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-4">
+                    <strong>Listen:</strong> TCP <span id="sstpPort"><?php echo sanitizeOutput($vpnCfg['SSTP_PORT'] ?? '4433'); ?></span>
+                </div>
+                <div class="col-md-4">
+                    <strong>RADIUS:</strong> <span id="sstpRadius"><?php echo sanitizeOutput($vpnCfg['SSTP_RADIUS'] ?? '10.200.10.1'); ?></span>
+                </div>
+                <div class="col-md-4">
+                    <strong>Pool:</strong> 10.200.10.0/24 (static per user)
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
     
     <!-- Search and Export Bar -->
     <div class="row mb-3">
@@ -1610,9 +1700,12 @@ $allRoutes = getPeerRoutes();
                 <th>Username</th>
                 <th>Server</th>
                 <th>Password</th>
-                <th><?php echo !empty($vpnCfg['OVPN_ENABLED']) ? 'L2TP IP' : 'IP Address'; ?></th>
+                <th><?php echo (!empty($vpnCfg['OVPN_ENABLED']) || !empty($vpnCfg['SSTP_ENABLED'])) ? 'L2TP IP' : 'IP Address'; ?></th>
                 <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
                 <th>OVPN IP</th>
+                <?php endif; ?>
+                <?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>
+                <th>SSTP IP</th>
                 <?php endif; ?>
                 <th>Routes <button class="refresh-btn" onclick="refreshAllRoutes()" title="Refresh all routes">↻</button></th>
                 <th>Actions</th>
@@ -1627,6 +1720,9 @@ $allRoutes = getPeerRoutes();
                     <td><?php echo sanitizeOutput($user['ip']); ?></td>
                     <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
                     <td><code><?php echo sanitizeOutput(ovpnIpFromChap($user['ip'])); ?></code></td>
+                    <?php endif; ?>
+                    <?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>
+                    <td><code><?php echo sanitizeOutput(sstpIpFromChap($user['ip'])); ?></code></td>
                     <?php endif; ?>
                     <td class="routes-cell">
                         <div class="routes-content" id="routes-content-<?php echo $index; ?>">
@@ -1680,6 +1776,14 @@ $allRoutes = getPeerRoutes();
                                     data-ip="<?php echo sanitizeOutput($user['ip']); ?>"
                                     data-nassecret="<?php echo sanitizeOutput($nasSecrets[$user['ip']] ?? ''); ?>"
                                     data-type="ovpn" data-bs-toggle="modal" data-bs-target="#scriptModal">OVPN</button>
+                            <?php endif; ?>
+                            <?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>
+                            <button class="btn btn-warning btn-sm script-btn"
+                                    data-user="<?php echo sanitizeOutput($user['client']); ?>"
+                                    data-pass="<?php echo sanitizeOutput($user['secret']); ?>"
+                                    data-ip="<?php echo sanitizeOutput($user['ip']); ?>"
+                                    data-nassecret="<?php echo sanitizeOutput($nasSecrets[sstpIpFromChap($user['ip'])] ?? ''); ?>"
+                                    data-type="sstp" data-bs-toggle="modal" data-bs-target="#scriptModal">SSTP</button>
                             <?php endif; ?>
                             <button class="btn btn-danger btn-sm"
                                     data-user-index="<?php echo (int)$index; ?>"
@@ -1994,11 +2098,16 @@ $allRoutes = getPeerRoutes();
 
 <script>
     // VPN coexistence flags + server params echoed from PHP
-    const VPN = <?php echo json_encode(['l2tp' => !empty($vpnCfg['L2TP_ENABLED']), 'ovpn' => !empty($vpnCfg['OVPN_ENABLED'])]); ?>;
+    const VPN = <?php echo json_encode(['l2tp' => !empty($vpnCfg['L2TP_ENABLED']), 'ovpn' => !empty($vpnCfg['OVPN_ENABLED']), 'sstp' => !empty($vpnCfg['SSTP_ENABLED'])]); ?>;
     function ovpnIpFromChap(ip) {
         const last = parseInt(String(ip || '').split('.').pop(), 10);
         if (!last || last <= 1 || last >= 255) return '';
         return '10.10.30.' + last;
+    }
+    function sstpIpFromChap(ip) {
+        const last = parseInt(String(ip || '').split('.').pop(), 10);
+        if (!last || last <= 1 || last >= 255) return '';
+        return '10.200.10.' + last;
     }
     const SRV = <?php echo json_encode([
         'ip'         => $vpnCfg['SERVER_IP'],
@@ -2006,6 +2115,8 @@ $allRoutes = getPeerRoutes();
         'l2tpRadius' => $vpnCfg['L2TP_RADIUS'],
         'ovpnRadius' => $vpnCfg['OVPN_RADIUS'],
         'ovpnPort'   => $vpnCfg['OVPN_PORT'],
+        'sstpRadius' => $vpnCfg['SSTP_RADIUS'],
+        'sstpPort'   => $vpnCfg['SSTP_PORT'],
         'coaPort'    => $vpnCfg['COA_PORT'],
     ]); ?>;
 
@@ -2094,6 +2205,7 @@ $allRoutes = getPeerRoutes();
                       <td>${secret}</td>
                       <td>${data.ip}</td>
                       ${VPN.ovpn ? `<td><code>${ovpnIpFromChap(data.ip)}</code></td>` : ''}
+                      ${VPN.sstp ? `<td><code>${sstpIpFromChap(data.ip)}</code></td>` : ''}
                       <td class="routes-cell">
                         <div class="routes-content" id="routes-content-${newIndex}">
                             <div class="text-muted">No routes configured</div>
@@ -2108,6 +2220,7 @@ $allRoutes = getPeerRoutes();
                           <div class="user-actions">
                               ${VPN.l2tp ? `<button class="btn btn-primary btn-sm script-btn" data-user="${client}" data-pass="${secret}" data-ip="${data.ip}" data-nassecret="" data-type="l2tp" data-bs-toggle="modal" data-bs-target="#scriptModal">L2TP</button>` : ''}
                               ${VPN.ovpn ? `<button class="btn btn-info btn-sm script-btn" data-user="${client}" data-pass="${secret}" data-ip="${data.ip}" data-nassecret="" data-type="ovpn" data-bs-toggle="modal" data-bs-target="#scriptModal">OVPN</button>` : ''}
+                              ${VPN.sstp ? `<button class="btn btn-warning btn-sm script-btn" data-user="${client}" data-pass="${secret}" data-ip="${data.ip}" data-nassecret="" data-type="sstp" data-bs-toggle="modal" data-bs-target="#scriptModal">SSTP</button>` : ''}
                               <button class="btn btn-danger btn-sm" onclick="confirmDelete(${newIndex})" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete User</button>
                           </div>
                       </td>
@@ -2931,6 +3044,19 @@ add service=hotspot,ppp,login address=${SRV.ovpnRadius} secret=NAS_SECRET timeou
 set accept=yes port=${SRV.coaPort}`;
     }
 
+    function buildSstpScript(u, p) {
+        return `# ===== SSTP client for ${u} =====
+/interface sstp-client
+add name=sstp-sas connect-to=${SRV.ip} port=${SRV.sstpPort} user=${u} password=${p} \\\\
+    verify-server-certificate=no add-default-route=no disabled=no
+
+# ===== RADIUS (add once on this router) =====
+/radius
+add service=hotspot,ppp,login address=${SRV.sstpRadius} secret=NAS_SECRET timeout=3s
+/radius incoming
+set accept=yes port=${SRV.coaPort}`;
+    }
+
     // Delegated click handler for the per-user L2TP/OVPN script buttons
     document.addEventListener('click', function(e) {
         const btn = e.target.closest('.script-btn');
@@ -2950,7 +3076,12 @@ set accept=yes port=${SRV.coaPort}`;
             label.textContent = 'MikroTik Script — OVPN (' + u + ')';
             hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over OpenVPN.';
             text.value = buildOvpnScript(u, p);
-            note.textContent = 'OVPN IP is static: 10.10.30.<last-octet of the chap IP> (e.g. L2TP 10.255.10.11 → OVPN 10.10.30.11). Add that IP in SAS → NAS with a shared secret, then set NAS_SECRET to match. RADIUS address on the router is 10.10.30.1.';
+            note.textContent = 'OVPN IP is static: 10.10.30.<last-octet> (L2TP 10.255.10.11 → 10.10.30.11). Add that IP in SAS → NAS. RADIUS on the router is 10.10.30.1.';
+        } else if (type === 'sstp') {
+            label.textContent = 'MikroTik Script — SSTP (' + u + ')';
+            hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over SSTP (port ' + SRV.sstpPort + ').';
+            text.value = buildSstpScript(u, p);
+            note.textContent = 'SSTP IP is static: 10.200.10.<last-octet> (L2TP 10.255.10.11 → 10.200.10.11). Add that IP in SAS → NAS. RADIUS on the router is 10.200.10.1. Port must be ' + SRV.sstpPort + ' (not 443).';
         } else {
             label.textContent = 'MikroTik Script — L2TP (' + u + ')';
             hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over L2TP/IPsec.';
@@ -3054,9 +3185,39 @@ function refreshOvpnServiceStatus() {
     });
 }
 
+function refreshSstpServiceStatus() {
+    const badge = document.getElementById('sstpServiceStatus');
+    if (!badge) return;
+    fetch('index.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'getServiceStatus=1&serviceTarget=sstp&csrf_token=' + document.querySelector('input[name="csrf_token"]').value
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.running) {
+            badge.className = 'badge bg-success';
+            badge.textContent = 'Running';
+        } else {
+            badge.className = 'badge bg-danger';
+            badge.textContent = data.status || 'Stopped';
+        }
+        const tunnels = document.getElementById('sstpTunnelCount');
+        const port = document.getElementById('sstpPort');
+        const radius = document.getElementById('sstpRadius');
+        if (tunnels) tunnels.textContent = data.tunnels || 0;
+        if (port && data.port) port.textContent = data.port;
+        if (radius && data.radius) radius.textContent = data.radius;
+    })
+    .catch(err => {
+        console.error('Error fetching SSTP status:', err);
+    });
+}
+
 function controlService(action, target) {
     target = target || 'l2tp';
-    const label = target === 'ovpn' ? 'OpenVPN' : 'L2TP';
+    const labels = {ovpn: 'OpenVPN', sstp: 'SSTP', l2tp: 'L2TP'};
+    const label = labels[target] || target;
     if (!confirm('Are you sure you want to ' + action + ' the ' + label + ' service?')) {
         return;
     }
@@ -3070,6 +3231,7 @@ function controlService(action, target) {
     .then(data => {
         alert(data.message + ' - Status: ' + data.status);
         if (target === 'ovpn') refreshOvpnServiceStatus();
+        else if (target === 'sstp') refreshSstpServiceStatus();
         else refreshServiceStatus();
     })
     .catch(err => {
@@ -3081,9 +3243,11 @@ function controlService(action, target) {
 document.addEventListener('DOMContentLoaded', function() {
     refreshServiceStatus();
     refreshOvpnServiceStatus();
+    refreshSstpServiceStatus();
     setInterval(function() {
         refreshServiceStatus();
         refreshOvpnServiceStatus();
+        refreshSstpServiceStatus();
     }, 30000);
 });
 </script>
