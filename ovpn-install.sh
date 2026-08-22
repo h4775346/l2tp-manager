@@ -187,6 +187,8 @@ client-connect /etc/openvpn/client-connect.sh
 user nobody
 group www-data
 status /var/log/openvpn/status.log
+management /var/run/openvpn-mgmt.sock unix
+management-client-user root
 verb 3
 EOF"
 

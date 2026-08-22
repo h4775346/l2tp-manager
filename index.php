@@ -1,5 +1,6 @@
 <?php
 include 'header.php';
+require_once __DIR__ . '/online.inc.php';
 
 /**
  * Check if request is AJAX/API request
@@ -755,6 +756,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode($target === 'ovpn' ? getOvpnServiceStatus() : ($target === 'sstp' ? getSstpServiceStatus() : getServiceStatus()));
         exit();
     }
+
+    if (isset($_POST['getOnline'])) {
+        header('Content-Type: application/json');
+        echo json_encode(['sessions' => listOnlineSessions()]);
+        exit();
+    }
+
+    if (isset($_POST['disconnectSession'])) {
+        header('Content-Type: application/json');
+        echo json_encode(disconnectSession(
+            $_POST['sessType'] ?? '',
+            $_POST['sessUser'] ?? '',
+            $_POST['sessIp'] ?? '',
+            $_POST['sessIface'] ?? ''
+        ));
+        exit();
+    }
     
     if (isset($_POST['logout'])) {
         session_destroy();
@@ -1437,6 +1455,7 @@ $allRoutes = getPeerRoutes();
     <div class="sidebar-brand">VPN Manager<span>SAS4 console</span></div>
     <nav class="sidebar-nav">
         <a class="sidebar-link is-active" href="#users">Users</a>
+        <a class="sidebar-link" href="#online">Online</a>
         <a class="sidebar-link" href="#services">Services</a>
     </nav>
     <div class="sidebar-foot"><?php echo (int)count($users); ?> accounts</div>
@@ -1521,6 +1540,33 @@ $allRoutes = getPeerRoutes();
         </div>
     </div>
     <?php endif; ?>
+    </div>
+
+    <div class="online-panel" id="online">
+        <div class="svc-card-head" style="padding:0 0 10px">
+            <span class="svc-name">Online now</span>
+            <div class="svc-actions">
+                <button class="btn btn-sm" type="button" onclick="refreshOnline()">Refresh</button>
+            </div>
+        </div>
+        <div class="table-wrap" style="margin:0">
+            <table class="users">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>User</th>
+                        <th>Tunnel IP</th>
+                        <th>Remote</th>
+                        <th>Since</th>
+                        <th>Iface</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="onlineTable">
+                    <tr><td colspan="7" class="text-muted">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <div class="toolbar" id="users">
@@ -1670,8 +1716,18 @@ $allRoutes = getPeerRoutes();
                             <label class="form-check-label" for="manualIpCheck">Set IP manually</label>
                         </div>
                         <div class="mb-3" id="ipInputSingle" style="display: none;">
-                            <label for="ip" class="form-label">IP Address</label>
-                            <input type="text" class="form-control" id="ip" name="ip">
+                            <label for="ip" class="form-label">L2TP IP (last octet also sets OVPN/SSTP)</label>
+                            <input type="text" class="form-control" id="ip" name="ip" oninput="updateVpnPreview()">
+                        </div>
+                        <div class="mb-0" id="vpnPreview" style="font-size:12px;color:var(--text-3,#8a8f98)">
+                            <div>L2TP <code id="previewL2tp"><?php echo sanitizeOutput(getNextIp($users)); ?></code></div>
+                            <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
+                            <div>OVPN <code id="previewOvpn"><?php echo sanitizeOutput(ovpnIpFromChap(getNextIp($users))); ?></code></div>
+                            <?php endif; ?>
+                            <?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>
+                            <div>SSTP <code id="previewSstp"><?php echo sanitizeOutput(sstpIpFromChap(getNextIp($users))); ?></code></div>
+                            <?php endif; ?>
+                            <div class="mt-1">One username works on every installed VPN.</div>
                         </div>
                     </form>
                 </div>
@@ -1706,6 +1762,10 @@ $allRoutes = getPeerRoutes();
                             <input type="text" class="form-control" id="ipRangeFrom" name="ipRangeFrom">
                             <label for="ipRangeTo" class="form-label">IP Range To</label>
                             <input type="text" class="form-control" id="ipRangeTo" name="ipRangeTo">
+                        </div>
+                        <div class="mb-0" style="font-size:12px;color:var(--text-3,#8a8f98)">
+                            Each new user gets L2TP <code>10.255.x.y</code><?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>, OVPN <code>10.10.30.y</code><?php endif; ?><?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>, SSTP <code>10.200.10.y</code><?php endif; ?>
+                            (same last octet). First free L2TP: <code><?php echo sanitizeOutput(getNextIp($users)); ?></code>
                         </div>
                     </form>
                 </div>
@@ -3085,16 +3145,93 @@ function controlService(action, target) {
     });
 }
 
+function updateVpnPreview() {
+    const ipEl = document.getElementById('ip');
+    const ip = (ipEl && ipEl.value) ? ipEl.value.trim() : '';
+    const last = parseInt(String(ip || '').split('.').pop(), 10);
+    const l2 = document.getElementById('previewL2tp');
+    const o = document.getElementById('previewOvpn');
+    const s = document.getElementById('previewSstp');
+    if (l2 && ip) l2.textContent = ip;
+    if (last && last > 1 && last < 255) {
+        if (o) o.textContent = '10.10.30.' + last;
+        if (s) s.textContent = '10.200.10.' + last;
+    }
+}
+
+function esc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+}
+
+function refreshOnline() {
+    const tb = document.getElementById('onlineTable');
+    if (!tb) return;
+    const tok = document.querySelector('input[name="csrf_token"]');
+    if (!tok) return;
+    fetch('index.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'getOnline=1&csrf_token=' + encodeURIComponent(tok.value)
+    })
+    .then(r => r.json())
+    .then(data => {
+        const rows = data.sessions || [];
+        if (!rows.length) {
+            tb.innerHTML = '<tr><td colspan="7" class="text-muted">No one online</td></tr>';
+            return;
+        }
+        tb.innerHTML = rows.map(function(s) {
+            return '<tr>' +
+                '<td>' + esc(s.type) + '</td>' +
+                '<td>' + esc(s.user) + '</td>' +
+                '<td class="ip">' + esc(s.ip) + '</td>' +
+                '<td class="ip">' + esc(s.remote) + '</td>' +
+                '<td>' + esc(s.since) + '</td>' +
+                '<td>' + esc(s.iface) + '</td>' +
+                '<td><button class="btn btn-sm btn-danger" type="button" onclick="kickSession(this)" ' +
+                'data-type="' + esc(s.type) + '" data-user="' + esc(s.user) + '" data-ip="' + esc(s.ip) + '" data-iface="' + esc(s.iface) + '">Disconnect</button></td>' +
+                '</tr>';
+        }).join('');
+    })
+    .catch(function() {
+        tb.innerHTML = '<tr><td colspan="7" class="text-muted">Failed to load</td></tr>';
+    });
+}
+
+function kickSession(btn) {
+    if (!confirm('Disconnect this session?')) return;
+    const tok = document.querySelector('input[name="csrf_token"]');
+    const body = 'disconnectSession=1&csrf_token=' + encodeURIComponent(tok.value) +
+        '&sessType=' + encodeURIComponent(btn.dataset.type || '') +
+        '&sessUser=' + encodeURIComponent(btn.dataset.user || '') +
+        '&sessIp=' + encodeURIComponent(btn.dataset.ip || '') +
+        '&sessIface=' + encodeURIComponent(btn.dataset.iface || '');
+    fetch('index.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body
+    })
+    .then(r => r.json())
+    .then(function(data) {
+        alert(data.message || (data.success ? 'Disconnected' : 'Failed'));
+        refreshOnline();
+    })
+    .catch(function(err) { alert('Error: ' + err); });
+}
+
 // Refresh status on page load
 document.addEventListener('DOMContentLoaded', function() {
     refreshServiceStatus();
     refreshOvpnServiceStatus();
     refreshSstpServiceStatus();
+    refreshOnline();
     setInterval(function() {
         refreshServiceStatus();
         refreshOvpnServiceStatus();
         refreshSstpServiceStatus();
-    }, 30000);
+        refreshOnline();
+    }, 15000);
 });
 </script>
 </body>
