@@ -79,7 +79,7 @@ a:hover { color: var(--accent-hover); }
 }
 
 .svc-card-head {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
   color: var(--text); font-size: 13px; font-weight: 590;
 }
 
@@ -221,6 +221,27 @@ table.users td.mono {
 .alert-warn {
   background: rgba(245, 165, 36, 0.1); border-color: rgba(245, 165, 36, 0.28); color: #f5c36a;
 }
+
+.content { display: flex; flex-direction: column; }
+.svc-card-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.svc-card-meta strong { color: var(--text-2); font-weight: 510; }
+.svc-name { display: inline-flex; align-items: center; gap: 8px; }
+.user-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.modal-content {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border: var(--border) !important;
+  border-radius: var(--r-shell) !important;
+}
+.modal-header, .modal-footer { border-color: rgba(255,255,255,0.08) !important; }
+.modal-title { color: var(--text) !important; font-weight: 590; }
+.form-control, .form-select {
+  background: var(--surface) !important;
+  border: var(--border) !important;
+  color: var(--text) !important;
+}
+.form-label, .form-check-label, .text-muted { color: var(--text-3) !important; }
 
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; }

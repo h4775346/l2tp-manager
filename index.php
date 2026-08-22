@@ -1559,12 +1559,12 @@ $allRoutes = getPeerRoutes();
                     <td><?php echo sanitizeOutput($user['client']); ?></td>
                     <td><?php echo sanitizeOutput($user['server']); ?></td>
                     <td><?php echo sanitizeOutput($user['secret']); ?></td>
-                    <td><?php echo sanitizeOutput($user['ip']); ?></td>
+                    <td class="ip"><?php echo sanitizeOutput($user['ip']); ?></td>
                     <?php if (!empty($vpnCfg['OVPN_ENABLED'])): ?>
-                    <td><code><?php echo sanitizeOutput(ovpnIpFromChap($user['ip'])); ?></code></td>
+                    <td class="ip"><?php echo sanitizeOutput(ovpnIpFromChap($user['ip'])); ?></td>
                     <?php endif; ?>
                     <?php if (!empty($vpnCfg['SSTP_ENABLED'])): ?>
-                    <td><code><?php echo sanitizeOutput(sstpIpFromChap($user['ip'])); ?></code></td>
+                    <td class="ip"><?php echo sanitizeOutput(sstpIpFromChap($user['ip'])); ?></td>
                     <?php endif; ?>
                     <td class="routes-cell">
                         <div class="routes-content" id="routes-content-<?php echo $index; ?>">
