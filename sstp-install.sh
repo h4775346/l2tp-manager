@@ -233,8 +233,8 @@ echo ""
 
 # Shared panel (l2tp-manager). Skip if already present so we never wipe
 # an existing L2TP/OVPN dashboard (sas4-install.sh rm -rf's the tree).
-if [[ -d /opt/sas4/site/l2tp-manager ]]; then
-    echo -e "${YELLOW}↪ Shared panel already at /opt/sas4/site/l2tp-manager — not reinstalling.${NC}"
+if [[ "${SKIP_GUI:-0}" == "1" ]] || [[ -d /opt/sas4/site/l2tp-manager ]]; then
+    echo -e "${YELLOW}↪ Shared panel already at /opt/sas4/site/l2tp-manager (or SKIP_GUI=1) — not reinstalling.${NC}"
 else
     echo -e "${BLUE}🚀 Installing shared Web Management Interface (/l2tp-manager/)...${NC}"
     TMP_GUI="$(mktemp)"

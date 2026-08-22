@@ -350,16 +350,19 @@ echo -e "${GREEN}   OpenVPN (TCP) Server Installation Complete!${NC}"
 echo -e "${GREEN}==============================================${NC}"
 echo ""
 
-# ---------------------------------------------------------------------------
-# Chain the web management interface (same as the L2TP full installer).
-# ---------------------------------------------------------------------------
-echo -e "${BLUE}🚀 Now installing Web Management Interface...${NC}"
-TMP_GUI="$(mktemp)"
-if curl -fsSL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-install.sh -o "$TMP_GUI"; then
-    sudo bash "$TMP_GUI"
-    rm -f "$TMP_GUI"
+# Shared panel. Skip if already present or SKIP_GUI=1 so we never wipe
+# an existing L2TP/SSTP dashboard (sas4-install.sh rm -rf's the tree).
+if [[ "${SKIP_GUI:-0}" == "1" ]] || [[ -d /opt/sas4/site/l2tp-manager ]]; then
+    echo -e "${YELLOW}↪ Shared panel already present (or SKIP_GUI=1) — not reinstalling.${NC}"
 else
-    rm -f "$TMP_GUI"
-    echo -e "${RED}❌ Failed to download the web interface installer. OVPN server is up; re-run sas4-install.sh later.${NC}" >&2
-    exit 1
+    echo -e "${BLUE}🚀 Now installing Web Management Interface...${NC}"
+    TMP_GUI="$(mktemp)"
+    if curl -fsSL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/sas4-install.sh -o "$TMP_GUI"; then
+        sudo bash "$TMP_GUI"
+        rm -f "$TMP_GUI"
+    else
+        rm -f "$TMP_GUI"
+        echo -e "${RED}❌ Failed to download the web interface installer. OVPN server is up; re-run sas4-install.sh later.${NC}" >&2
+        exit 1
+    fi
 fi

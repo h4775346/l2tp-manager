@@ -22,7 +22,12 @@ A powerful, web-based management interface for VPN servers with advanced per-use
 
 ## 🚀 Quick Start - One Line Installation
 
-Two all-in-one installers plus SSTP. Each sets up its VPN plus the shared web panel. They can run on the **same server, in any order, and repeatedly** — each upserts its own state key-by-key, so they never clobber each other.
+**All three VPNs + GUI + per-user routing (recommended):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/h4775346/l2tp-manager/master/triple-all-in-one-installer.sh | sudo bash
+```
+
+Or install one transport at a time (same server, any order, repeatable):
 
 **L2TP/IPSec:**
 ```bash
