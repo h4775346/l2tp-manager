@@ -1966,7 +1966,7 @@ $allRoutes = getPeerRoutes();
       </div>
       <div class="modal-body">
         <p class="text-muted mb-2" id="scriptHint"></p>
-        <textarea id="scriptText" class="form-control" style="font-family:monospace;font-size:13px;white-space:pre;" rows="16" readonly></textarea>
+        <textarea id="scriptText" class="form-control" style="font-family:monospace;font-size:13px;white-space:pre;overflow-x:auto;" rows="3" readonly></textarea>
         <div class="alert alert-warning mt-3 mb-0" id="scriptRadiusNote" style="font-size:13px;"></div>
       </div>
       <div class="modal-footer">
@@ -2922,49 +2922,19 @@ $allRoutes = getPeerRoutes();
     }
     
     // ==================== MikroTik Script Generator ====================
-    function buildL2tpScript(u, p, ip, nasSecret) {
-        const secret = nasSecret || 'NAS_SECRET';
-        return `# ===== L2TP/IPsec client for ${u} =====
-/interface l2tp-client
-add name=l2tp-sas connect-to=${SRV.ip} user=${u} password=${p} \\
-    use-ipsec=yes ipsec-secret=${SRV.ipsecPsk} profile=default-encryption \\
-    add-default-route=no disabled=no
-
-# ===== RADIUS (add once on this router) =====
-# Optional: clear old radius servers for these services first:
-# /radius remove [find where service~"ppp" or service~"hotspot" or service~"login"]
-/radius
-add service=hotspot,ppp,login address=${SRV.l2tpRadius} secret=${secret} timeout=3s
-/radius incoming
-set accept=yes port=${SRV.coaPort}`;
+    // One line only — MikroTik terminal rejects \ continuations, # comments,
+    // and a second /radius add ("already have such item").
+    function rosQuote(s) {
+        return '"' + String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
     }
-
+    function buildL2tpScript(u, p) {
+        return '/interface l2tp-client remove [find name="l2tp-sas"]; /interface l2tp-client add name="l2tp-sas" connect-to=' + rosQuote(SRV.ip) + ' user=' + rosQuote(u) + ' password=' + rosQuote(p) + ' use-ipsec=yes ipsec-secret=' + rosQuote(SRV.ipsecPsk) + ' add-default-route=no disabled=no';
+    }
     function buildOvpnScript(u, p) {
-        return `# ===== OpenVPN (TCP) client for ${u} =====
-/interface ovpn-client
-add name=ovpn-sas connect-to=${SRV.ip} port=${SRV.ovpnPort} protocol=tcp \\
-    user=${u} password=${p} auth=sha1 cipher=aes256-cbc certificate=none \\
-    verify-server-certificate=no add-default-route=no disabled=no
-# RouterOS 6: use  cipher=aes256
-
-# ===== RADIUS (add once on this router) =====
-/radius
-add service=hotspot,ppp,login address=${SRV.ovpnRadius} secret=NAS_SECRET timeout=3s
-/radius incoming
-set accept=yes port=${SRV.coaPort}`;
+        return '/interface ovpn-client remove [find name="ovpn-sas"]; /interface ovpn-client add name="ovpn-sas" connect-to=' + rosQuote(SRV.ip) + ' port=' + SRV.ovpnPort + ' protocol=tcp user=' + rosQuote(u) + ' password=' + rosQuote(p) + ' auth=sha1 cipher=aes256-cbc certificate=none verify-server-certificate=no add-default-route=no disabled=no';
     }
-
     function buildSstpScript(u, p) {
-        return `# ===== SSTP client for ${u} =====
-/interface sstp-client
-add name=sstp-sas connect-to=${SRV.ip} port=${SRV.sstpPort} user=${u} password=${p} \\\\
-    verify-server-certificate=no add-default-route=no disabled=no
-
-# ===== RADIUS (add once on this router) =====
-/radius
-add service=hotspot,ppp,login address=${SRV.sstpRadius} secret=NAS_SECRET timeout=3s
-/radius incoming
-set accept=yes port=${SRV.coaPort}`;
+        return '/interface sstp-client remove [find name="sstp-sas"]; /interface sstp-client add name="sstp-sas" connect-to=' + rosQuote(SRV.ip) + ' port=' + SRV.sstpPort + ' user=' + rosQuote(u) + ' password=' + rosQuote(p) + ' verify-server-certificate=no add-default-route=no disabled=no';
     }
 
     // Delegated click handler for the per-user L2TP/OVPN script buttons
@@ -2984,22 +2954,22 @@ set accept=yes port=${SRV.coaPort}`;
 
         if (type === 'ovpn') {
             label.textContent = 'MikroTik Script — OVPN (' + u + ')';
-            hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over OpenVPN.';
+            hint.textContent = 'One line — paste into the MikroTik terminal. ROS6: change cipher=aes256-cbc to cipher=aes256.';
             text.value = buildOvpnScript(u, p);
-            note.textContent = 'OVPN IP is static: 10.10.30.<last-octet> (L2TP 10.255.10.11 → 10.10.30.11). Add that IP in SAS → NAS. RADIUS on the router is 10.10.30.1.';
+            note.textContent = 'OVPN NAS IP is 10.10.30.<last-octet> (user1 → 10.10.30.11). RADIUS address on the router is 10.10.30.1. Do not paste /radius add twice.';
         } else if (type === 'sstp') {
             label.textContent = 'MikroTik Script — SSTP (' + u + ')';
-            hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over SSTP (port ' + SRV.sstpPort + ').';
+            hint.textContent = 'One line — paste into the MikroTik terminal. Port must be ' + SRV.sstpPort + ' (not 443).';
             text.value = buildSstpScript(u, p);
-            note.textContent = 'SSTP IP is static: 10.200.10.<last-octet> (L2TP 10.255.10.11 → 10.200.10.11). Add that IP in SAS → NAS. RADIUS on the router is 10.200.10.1. Port must be ' + SRV.sstpPort + ' (not 443).';
+            note.textContent = 'SSTP NAS IP is 10.200.10.<last-octet> (user1 → 10.200.10.11). RADIUS address on the router is 10.200.10.1. Port ' + SRV.sstpPort + '.';
         } else {
             label.textContent = 'MikroTik Script — L2TP (' + u + ')';
-            hint.textContent = 'Paste this into the MikroTik terminal to connect ' + u + ' over L2TP/IPsec.';
-            text.value = buildL2tpScript(u, p, ip, nasSecret);
+            hint.textContent = 'One line — paste into the MikroTik terminal.';
+            text.value = buildL2tpScript(u, p);
             if (nasSecret) {
-                note.textContent = 'RADIUS secret already filled: tunnel IP ' + ip + ' is registered in SAS → NAS with secret ' + nasSecret + '.';
+                note.textContent = 'Tunnel IP ' + ip + ' is in SAS → NAS (secret ' + nasSecret + '). RADIUS on the router is ' + SRV.l2tpRadius + ' — add it once, not in this paste.';
             } else {
-                note.textContent = '⚠ Tunnel IP ' + ip + ' is NOT yet in SAS → NAS. Add it there with a shared secret, then replace NAS_SECRET in the script. Without this, RADIUS auth is rejected.';
+                note.textContent = 'Tunnel IP ' + ip + ' is NOT yet in SAS → NAS. Add it there with a shared secret or RADIUS auth is rejected. RADIUS on the router is ' + SRV.l2tpRadius + '.';
             }
         }
     });

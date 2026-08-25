@@ -63,7 +63,7 @@ The panel and user store are shared; only the transport differs. You can offer L
 - **MikroTik-compatible crypto** — AES-256-CBC / SHA1, so RouterOS clients connect out of the box.
 
 ### MikroTik scripts from the panel
-Each user row has **L2TP**, **OVPN**, and **SSTP** buttons (only for VPNs actually installed) that generate ready-to-paste MikroTik scripts.
+Each user row has **L2TP**, **OVPN**, and **SSTP** buttons (only for VPNs actually installed). Copy is **one line** (remove-if-exists + add). Paste into the MikroTik terminal — no `\` wraps, no `/radius add` (that errors on the second paste).
 
 ## 🛠️ Manual Installation Options
 
