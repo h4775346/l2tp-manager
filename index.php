@@ -690,6 +690,52 @@ foreach ($users as &$user) {
 }
 unset($user); // Break the reference
 
+// connect-to= must be the address a MikroTik can dial, not a value frozen
+// at install. hostname -I's first address is often a tunnel or clone IP.
+function l2tpResolveConnectIp($configured) {
+    $skip = function ($ip) {
+        if (!is_string($ip) || !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return true;
+        }
+        if ($ip === '127.0.0.1' || $ip === '0.0.0.0') {
+            return true;
+        }
+        if (preg_match('/^10\\.10\\.30\\./', $ip)) return true;
+        if (preg_match('/^10\\.200\\./', $ip)) return true;
+        if (preg_match('/^10\\.255\\.10\\./', $ip)) return true;
+        return false;
+    };
+
+    $host = preg_replace('/:\\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? ''));
+    $host = trim($host, '[]');
+    if (!$skip($host)) {
+        return $host;
+    }
+
+    $route = trim((string)@shell_exec('ip -4 route get 1.1.1.1 2>/dev/null'));
+    if (preg_match('/\\ssrc\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)/', $route, $m) && !$skip($m[1])) {
+        return $m[1];
+    }
+
+    $addrs = trim((string)@shell_exec('ip -4 -o addr show scope global 2>/dev/null'));
+    if (preg_match_all('/inet\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)/', $addrs, $all)) {
+        foreach ($all[1] as $ip) {
+            if (!$skip($ip)) {
+                return $ip;
+            }
+        }
+    }
+
+    if (!$skip($configured)) {
+        return $configured;
+    }
+    $addr = (string)($_SERVER['SERVER_ADDR'] ?? '');
+    if (!$skip($addr)) {
+        return $addr;
+    }
+    return is_string($configured) ? $configured : '';
+}
+
 // Load VPN coexistence config (written by sibling installer). Defaults keep
 // backward compatibility: this panel has always been L2TP-only.
 $vpnCfg = @parse_ini_file('/etc/l2tp-manager/vpn.conf') ?: [];
@@ -707,6 +753,7 @@ $vpnCfg += [
     'SSTP_PORT'    => '4433',
     'SSTP_RADIUS'  => '10.200.10.1',
 ];
+$vpnCfg['SERVER_IP'] = l2tpResolveConnectIp($vpnCfg['SERVER_IP'] ?? '');
 if (empty($vpnCfg['SSTP_ENABLED'])) {
     $sstpActive = trim((string)@shell_exec('systemctl is-active sstpd 2>/dev/null'));
     if ($sstpActive === 'active' || is_file('/etc/systemd/system/sstpd.service')) {

@@ -286,7 +286,7 @@ fi
 # server IP the same way all-in-one-installer.sh does.
 echo ""
 echo -e "${CYAN}📝 Recording L2TP config in /etc/l2tp-manager/vpn.conf...${NC}"
-SERVER_IP=$(hostname -I | awk '{print $1}')
+SERVER_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
 [ -z "$SERVER_IP" ] && SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1)
 [ -z "$SERVER_IP" ] && SERVER_IP=$(ip addr show | grep -oP 'inet \K[\d.]+' | grep -v '^127\.' | head -1)
 [ -z "$SERVER_IP" ] && SERVER_IP="your-server-ip"
